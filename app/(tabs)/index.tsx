@@ -10,6 +10,8 @@ import Prepare from '@/components/Prepare';
 import { NavigationIndependentTree } from '@react-navigation/native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { Link } from 'expo-router';
+import Backfill from '@/components/Backfill';
+import Merge from '@/components/Merge';
 
 const Stack = createNativeStackNavigator();
 
@@ -18,6 +20,8 @@ export default function HomeScreen() {
     <NavigationIndependentTree>
       <Stack.Navigator screenOptions={{ headerShown: false}}>
         <Stack.Screen name="Prepare" component={Prepare} options={{orientation: 'landscape_left'}}></Stack.Screen>
+        <Stack.Screen name="Backfill" component={Backfill} options={{orientation: 'landscape_left'}}></Stack.Screen>
+        <Stack.Screen name="Merge" component={Merge} options={{orientation: 'landscape_left'}}></Stack.Screen>
       </Stack.Navigator>
     </NavigationIndependentTree>
   );

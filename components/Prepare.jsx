@@ -1,10 +1,15 @@
+import axios from 'axios';
+import { router } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
-import { useDispatch, useSelector } from 'react-redux';
+import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { addContainer, addOrder } from '@/app/redux/parallelSlice';
+import { useDispatch, useSelector } from 'react-redux';
+import { addBackfill, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder } from '../../ParallelPicker/app/redux/parallelSlice';
 
 // Version 0.1
+// 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
+const trashIcon = require('../assets/images/delete.png');
 
 const Prepare = ({navigation}) => {
     const dispatch = useDispatch();
@@ -18,6 +23,50 @@ const Prepare = ({navigation}) => {
     const orderRef = useRef('');
     const containerRef = useRef('');
 
+    const user = useSelector(state => state.user.user);
+    const backfillOrders = useSelector(state => state.parallel.backfillOrders);
+    const backfillItems = useSelector(state => state.parallel.backfillItems);
+
+    async function getBackFillDetails () {
+        console.log("starting getBackfill");
+        try {
+            console.log("entering getBackfill try");
+            console.log("backfill orders: ", orders);
+            const response = await axios.post('http://192.168.2.165/api/Order/getBackFillDetails' , {
+                token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+                EmployeeId: user.employeeID,
+                Orders: backfillOrders
+            })
+
+            if (response.data.success) {
+                console.log("backfill success");
+                dispatch(populateBackfill(response.data.data));
+                // console.log("response: ", response);
+                // dispatch(queueBackfill(response.data.data));
+                let pruneBackfill = [];
+                for (let i = 0; i < response.data.data.length; i++) {
+                    if (response.data.data[i].scannedQty < response.data.data[i].orderedQty) {
+                        pruneBackfill.push(response.data.data[i]);
+                    }
+                }
+                dispatch(queueBackfill(pruneBackfill));
+            } else {
+                console.log("backfill failure");
+                console.log(response.data.reason);
+            }
+        } catch (err) {
+            console.log("backfill error");
+            console.error(err.message);
+            console.log(err.response?.data?.reason);
+        } finally {
+
+        }       
+    }
+
+    useEffect(() => {
+       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+    }, []);
+
     useEffect(() => {
         if (order.length >= 6) {
             setTimeout(() => {
@@ -30,6 +79,10 @@ const Prepare = ({navigation}) => {
         if (container.length >= 6 && order.length >= 6) {
             dispatch(addOrder(order));
             dispatch(addContainer(container));
+            dispatch(addBackfill({
+                OrderId: order,
+                ContainerBarcode: container
+            }))
             setTimeout(() => {
                 orderRef.current?.focus();
             }, 500)
@@ -37,10 +90,25 @@ const Prepare = ({navigation}) => {
     }, [container])
 
     useEffect(() => {
+        console.log("backfillOrders: ", backfillOrders);
+    }, [backfillOrders])
+
+    useEffect(() => {
+        // console.log("backfillItems: ", backfillItems);
+
+        if (backfillItems.length > 0 || orders.length > 0) {
+            router.push('/picker/backfill');
+        }
+    }, [backfillItems])
+
+    useEffect(() => {
         if ((orders.length > 0 && containers.length > 0) && orders[orders.length - 1].length >= 6 && containers[containers.length - 1].length >= 6) {
             setOrder("");
             setContainer("");
         }
+
+        console.log("orders: ", orders);
+        console.log("containers: ", containers);
     }, [orders, containers])
 
     return (
@@ -69,9 +137,15 @@ const Prepare = ({navigation}) => {
                 </Modal>
         </SafeAreaView>
         <SafeAreaView style={{...styles.container, position: 'absolute'}}>
-            <Text style={styles.label}>Orders</Text>
+            <Text style={{...styles.label, height: 45}}>Orders</Text>
             {orders.map((item, i) => {
-                return <Text style={{fontSize: 20}} key={i}>{item}</Text>
+                return <View key={i} style={{flexDirection: 'row', justifyContent: 'space-between', width: '25%'}}>
+                    <Text style={{fontSize: 20}}>{item}</Text>
+                    <TouchableOpacity key={`delete-${i}`} onPress={() => {
+                        dispatch(removeOrder(i));
+                        dispatch(removeContainer(i));
+                    }}><Image style={{width: 30, height: 30}}source={trashIcon} alt="delete icon" /></TouchableOpacity>
+                </View>
             })}
         </SafeAreaView>
         <View style={styles.container}>
@@ -115,7 +189,9 @@ const Prepare = ({navigation}) => {
                     value={container}
                 ></TextInput>
             </View>
-            <TouchableOpacity style={styles.button}>
+            <TouchableOpacity style={styles.button} onPress={() => {
+                getBackFillDetails();
+            }}>
                 <Text style={styles.buttonText}>Next</Text>
             </TouchableOpacity>
         </View>
