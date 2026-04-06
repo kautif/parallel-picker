@@ -5,7 +5,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addArrangedBackfillItem, addArrangedBackfillObj, removeBackfillItem } from '../../ParallelPicker/app/redux/parallelSlice';
+import { addArrangedBackfillItem, addArrangedBackfillObj, addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 
 const Backfill = ({navigation}) => {
@@ -13,6 +13,9 @@ const Backfill = ({navigation}) => {
     const [locations, setLocations] = useState([]);
     const [orderedLocs, setOrderedLocs] = useState([]);
     const [scannedLoc, setScannedLoc] = useState("");
+    const [requiredOrders, setRequiredOrders] = useState([]);
+    // const [verifiedOrders, setVerifiedOrders] = useState([]);
+    const [verifyOrderVal, setVerifyOrderVal] = useState([]);
 
     // const [toteScanned, setToteScanned] = useState(false);
     const [tote, setTote] = useState("");
@@ -38,18 +41,23 @@ const Backfill = ({navigation}) => {
     const [errorMsg, setErrorMsg] = useState("");
     const [sending, setSending] = useState(false);
     const [orderComplete, setOrderComplete] = useState(false);
-    // const [backfillComplete, setBackfillComplete] = useState(false);
+    const [backfillCompleted, setBackfillCompleted] = useState(false);
     const [picksCompleted, setPicksCompleted] = useState(0);
 
     const [itemDescriptionVisible, setItemDescriptionVisible] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
+    const [bfModalVisible, setBfModalVisible] = useState(false);
     const [showKeyboard, setShowKeyboard] = useState(false);
     const [sound, setSound] = useState();
 
     const dispatch = useDispatch();
     const orders = useSelector(state => state.parallel.orders);
+    const verifiedOrders = useSelector(state => state.parallel.verifiedOrders);
     const backfillItems = useSelector(state => state.parallel.backfillItems);
+    const backfillOrderIds = useSelector(state => state.parallel.backfillOrderIds);
     const backfillsArranged = useSelector(state => state.parallel.backfillsArranged);
+    const isReturning = useSelector(state => state.parallel.isReturning);
+    const picksStarted = useSelector(state => state.parallel.picksStarted);
     let username = useSelector(state => state.user.name);
     const user = useSelector(state => state.user.user);
 
@@ -62,15 +70,17 @@ const Backfill = ({navigation}) => {
     const { AudioRouter } = NativeModules;
 
     const nextItem = require('../../WarehouseScanner/assets/sounds/next_item.mp3');
+    const buzzer = require('../../WarehouseScanner/assets/sounds/buzzer.mp3');
     const scanContainerSound = require('../../WarehouseScanner/assets/sounds/scan_container.mp3');
     const wrongLocation = require('../../WarehouseScanner/assets/sounds/wrong_location.mp3');
     const wrongItem = require('../../WarehouseScanner/assets/sounds/wrong_item.mp3');
     const scanContainerFail = require('../../WarehouseScanner/assets/sounds/did_not_scan_container.mp3');
+    const backfillDoneSound = require('../../WarehouseScanner/assets/sounds/backfill_completed.mp3');
     const loadingAnim = require('../../WarehouseScanner/assets/images/loading.webp');
     const editIcon = require('../../WarehouseScanner/assets/images/edit.png');
 
     useEffect(() => {
-        playSound(nextItem);
+        // playSound(nextItem);
         const existingIds = new Set(backfillsArranged.map(obj => obj.orderId));
         const newObjs = orders
         .filter(id => !existingIds.has(id))
@@ -119,7 +129,22 @@ const Backfill = ({navigation}) => {
                 setScannedBefore(true);
             }
         }
+
+        backfillOrderIds.map(item => {
+            if (requiredOrders.length < backfillOrderIds.length) {
+                setRequiredOrders(prevId => [...prevId, String(item.orderId)]);
+            }
+        })
     }, [])
+
+    useEffect(() => {
+        console.log('reqd orders: ', requiredOrders.length);
+        if (requiredOrders.length === 0) {
+            // dispatch(setIsReturning(false)); 
+        } else {
+            // dispatch(setIsReturning(true));
+        }
+    }, [requiredOrders])
 
     useEffect(() => {
         console.log("atLocation", backfillItems);
@@ -127,9 +152,11 @@ const Backfill = ({navigation}) => {
             // setLocations([backfillItems[0].location, backfillItems[0].binLocation])
             setOrderedLocs([backfillItems[0].location, backfillItems[0].binLocation])
             setItemName(backfillItems[0].description);
+            playSound(nextItem);
         } else {
-            // playSound(nextItem);
+            // playSound(scanContainerSound);
             itemRef.current?.focus();
+            setScannedLoc("");
         }
     }, [atLocation])
 
@@ -137,13 +164,16 @@ const Backfill = ({navigation}) => {
         if (backfillItems.length > 0) {
             setOrderedItem(backfillItems[0].gamacode);
         } else {
-            router.push('./merge');
+            // router.push('./merge');
+            updateBackfill();
         }
     }, [backfillItems])
 
     useEffect(() => {
-        console.log("backfills arranged: ", backfillsArranged);
-    }, [backfillsArranged])
+        if (backfillCompleted === true) {
+            router.push('./merge');
+        }
+    }, [backfillCompleted])
 
     useEffect(() => {
         if (showKeyboard === true) {
@@ -163,7 +193,7 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         setScannedItem("");
-        console.log("scannnedQty useEffect")
+        console.log("scannedQty useEffect")
         if (backfillItems.length > 0 && scannedQty === backfillItems[0].orderedQty ) {
             setTimeout(() => {
                 toteRef.current?.focus();
@@ -181,6 +211,7 @@ const Backfill = ({navigation}) => {
 
         if (backfillItems.length > 0 && tote.length > 0 && tote != backfillItems[0].containerBarcode) {
             console.log("TOTE MISMATCH");
+            // playSound(scanContainerFail);
             setErrorMsg(`Wrong Tote \n SCAN ${backfillItems[0].containerBarcode}`);
             setModalVisible(true);
             setTote("");
@@ -226,46 +257,65 @@ const Backfill = ({navigation}) => {
     }
 
     const updateQty = useCallback(async () => {
-    console.log("UPDATING backfill quantity");
-    console.log("UPDATEQTY: ", user.employeeID);
-    console.log("UPDATEQTY: ", backfillItems[0].orderId);
-    console.log("UPDATEQTY: ", scannedLoc);
-    console.log("UPDATEQTY: ", scannedQty);
-    try {
-        const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillDetails', {
-            token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
-            employeeId: user.employeeID,
-            newOrderBackFillItemsId: backfillItems[0].sNo,
-            pickLocation: scannedLoc,
-            scannedQty: scannedQty,
-        });
+        console.log("UPDATING backfill quantity");
+        console.log("employee id: ", user.employeeID);
+        console.log("order id: ", backfillItems[0].orderId);
+        console.log("item id: ", backfillItems[0].orderBackFillItemsId);
+        console.log("location: ", scannedLoc);
+        console.log("UPDATEQTY: ", scannedQty);
+        try {
+            const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillDetails', {
+                token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
+                employeeId: user.employeeID,
+                orderBackFillItemsId: backfillItems[0].orderBackFillItemsId,
+                pickLocation: scannedLoc,
+                scannedQty: scannedQty,
+            });
 
-        if (!response.data.success) {
-            setErrorMsg(response.data.reason);
-            setModalVisible(true);
-            setTimeout(() => {
-                setModalVisible(false);
-                setOrderNum("");
-                setErrorMsg("");
-            }, 2000);
-        } else {
-            for (let i = 0; i < backfillsArranged.length; i++) {
-                console.log("backfills arranged id: ", backfillsArranged[i].orderId);
-                console.log("backfills [0] id: ", backfillItems[0].orderId);
-                if (parseInt(backfillsArranged[i].orderId) == parseInt(backfillItems[0].orderId)) {
-                    console.log("backfill Ids match");
-                    dispatch(addArrangedBackfillItem(backfillItems[0]));
+            if (!response.data.success) {
+                setErrorMsg(response.data.reason);
+                setModalVisible(true);
+                setTimeout(() => {
+                    setModalVisible(false);
+                    setOrderNum("");
+                    setErrorMsg("");
+                }, 2000);
+            } else {
+                for (let i = 0; i < backfillsArranged.length; i++) {
+                    console.log("backfills arranged id: ", backfillsArranged[i].orderId);
+                    console.log("backfills [0] id: ", backfillItems[0].orderId);
+                    if (parseInt(backfillsArranged[i].orderId) == parseInt(backfillItems[0].orderId)) {
+                        console.log("backfill Ids match");
+                        dispatch(addArrangedBackfillItem(backfillItems[0]));
+                    }
                 }
+                dispatch(removeBackfillItem());
+                setAtLocation(false);
+                setScannedQty(0);
+                setTote("");
             }
-            dispatch(removeBackfillItem());
-            setAtLocation(false);
-            setScannedQty(0);
-            setTote("");
+        } catch (err) {
+            console.error("Error updating order:", err);
         }
-    } catch (err) {
-        console.error("Error updating order:", err);
-    }
-}, [scannedQty, scannedLoc, backfillItems, user.employeeID, dispatch]);
+    }, [scannedQty, scannedLoc, backfillItems, user.employeeID, dispatch]);
+
+    const updateBackfill = useCallback(async () => {
+        try {
+            const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillCompleted', {
+                token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
+                employeeId: user.employeeID,
+                orders: backfillOrderIds
+            })
+
+            if (response.data.success) {
+                setBfModalVisible(true);
+                setErrorMsg("Backfill Completed");
+                playSound(backfillDoneSound);
+            }
+        } catch (err) {
+            console.log("backfill update error: ", err.message);
+        }
+    }, [backfillOrderIds])
 
     const handleEditIconPress = async () => {
         console.log("handleEditIconPress called");
@@ -354,28 +404,67 @@ const Backfill = ({navigation}) => {
             <Modal
             animationType="slide"
             transparent={true}
-            visible={modalVisible}
+            visible={modalVisible || bfModalVisible}
             onRequestClose={() => {
                 setErrorMsg("");
                 setScannedLoc("");
                 setTote("");
+                setModalVisible(false);
+                setBfModalVisible(false);
+                if (backfillItems.length === 0) {
+                    router.push('./merge');
+                    setBackfillCompleted(true);
+                }
             }}
             >
                 <View style={styles.centeredView}>
                     <View style={styles.modalView}>
                         <Text style={styles.modalText}>{errorMsg}</Text>
-                        <TouchableOpacity style={{...styles.button, marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20}}onPress={() =>{
-                            setModalVisible(!modalVisible);
+                        <TouchableOpacity style={{...styles.button, marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20}}
+                        onPress={() => {
+                            setModalVisible(false);
+                            setBfModalVisible(false);
                             setErrorMsg("");
-                            
-                            // If order is not available (!orderStatus), reset orderId to show Scan Order Ticket section
-                            if (backfillItems.length === 0 || backfillItems[0].orderId.length < 6) {
-                                // dispatch(setOrderId(''));
-                                orderIdRef.current = '';
+                            if (backfillItems.length === 0) {
+                                router.push('./merge');
                             }
                         }}>
                             <Text style={{color: 'white', fontSize: 20}}>Close</Text>
                         </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+            animationType="slide"
+            transparent={true}
+            visible={picksStarted && isReturning && verifiedOrders.length !== backfillOrderIds.length}>
+                <View style={styles.centeredView}>
+                    <View style={styles.modalView}>
+                        <Text style={styles.modalText}>Verify Order {requiredOrders[0]}</Text>
+                        <TextInput 
+                            style={{...styles.inputField, borderColor: 'black', borderWidth: 1, width: 150}}
+                            placeholder='Scan order'
+                            autoFocus={true}
+                            showSoftInputOnFocus={false}
+                            onChangeText={async (newVal) => {
+                                setVerifyOrderVal(newVal);
+                                if (newVal.slice(0, 6) === requiredOrders[0].slice(0,6)) {
+                                    // setVerifyOrder(true);
+                                    setRequiredOrders(prevOrders => prevOrders.slice(1));
+                                    dispatch(addVerifiedOrder(newVal));
+                                    setVerifyOrderVal("");
+                                } else {
+                                    setErrorMsg(`Incorrect Order`);
+                                    playSound(buzzer);
+                                    setModalVisible(true);
+                                    setVerifyOrderVal("");
+                                    // setTimeout(() => {
+                                    //     setModalVisible(false);
+                                    // }, 2000)
+                                }
+                            }}
+                            value={verifyOrderVal}
+                        />
                     </View>
                 </View>
             </Modal>
@@ -526,8 +615,8 @@ const Backfill = ({navigation}) => {
                                         
                                         setErrorMsg(`Incorrect Location \n ${newVal}`);
                                         playSound(wrongLocation);
+                                        setScannedLoc("");
                                         setModalVisible(true);
-                                        // setScannedLoc("");
                                         // setTimeout(() => {
                                         //     setModalVisible(false);
                                         // }, 2000)
@@ -543,6 +632,7 @@ const Backfill = ({navigation}) => {
                                         
                                         setErrorMsg(`Incorrect Location \n ${newVal}`);
                                         playSound(wrongLocation);
+                                        setScannedLoc("");
                                         setModalVisible(true);
                                     } else if (showKeyboard === false && orderedLocs.includes(newVal)) {
                                         // Correct location scanned
@@ -705,6 +795,7 @@ const Backfill = ({navigation}) => {
                                             //     scanned: newVal
                                             // });
                                             setErrorMsg(`Wrong Barcode \n ${newVal}`);
+                                            // playSound(scanContainerFail);
                                             setModalVisible(true);
                                             setTote("");
                                             // setTimeout(() => {
@@ -727,7 +818,7 @@ const Backfill = ({navigation}) => {
                                         }
 
                                         if (newVal !== backfillItems[0].containerBarcode) {
-                                            playSound(scanContainerSound);
+                                            playSound(scanContainerFail);
                                         }
                                     }}
                                     onFocus={() => {

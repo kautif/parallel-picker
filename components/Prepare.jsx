@@ -2,10 +2,11 @@ import axios from 'axios';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addBackfill, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder } from '../../ParallelPicker/app/redux/parallelSlice';
+import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../app/redux/parallelSlice';
+import { Audio } from 'expo-av';
 
 // Version 0.1
 // 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
@@ -19,6 +20,8 @@ const Prepare = ({navigation}) => {
     const [container, setContainer] = useState("");
     const [modalVisible, setModalVisible] = useState(false);
     const [errorMsg, setErrorMsg] = useState("");
+    const [hasMerge, setHasMerge] = useState(false);
+    // const [picksStarted, setPicksStarted] = useState(false);
 
     const orderRef = useRef('');
     const containerRef = useRef('');
@@ -26,6 +29,49 @@ const Prepare = ({navigation}) => {
     const user = useSelector(state => state.user.user);
     const backfillOrders = useSelector(state => state.parallel.backfillOrders);
     const backfillItems = useSelector(state => state.parallel.backfillItems);
+    const initialBackfill = useSelector(state => state.parallel.initialBackfill);
+    const picksStarted = useSelector(state => state.parallel.picksStarted); 
+    const mergedBackfills = useSelector(state => state.parallel.mergedBackfills);
+
+    const buzzer = require('../../WarehouseScanner/assets/sounds/buzzer.mp3');
+
+       async function playSound (audioFile) {
+            try {
+                // Method 1: Expo Audio reconfiguration
+                await Audio.setAudioModeAsync({
+                    allowsRecordingIOS: false,
+                    staysActiveInBackground: false,
+                    playsInSilentModeIOS: true,
+                    shouldDuckAndroid: true,
+                    playThroughEarpieceAndroid: false,
+                });
+    
+                // Method 2: Native module (if available)
+                if (Platform.OS === 'android' && AudioRouter) {
+                    try {
+                        await AudioRouter.forceSpeakerOutput();
+                    } catch (nativeError) {
+                        console.log('Native audio routing failed in playSound:', nativeError.message);
+                    }
+                }
+                
+                const { sound } = await Audio.Sound.createAsync(audioFile);
+                setSound(sound);
+                
+                // Set volume to max to ensure it's audible
+                await sound.setVolumeAsync(1.0);
+                await sound.playAsync();
+            } catch (error) {
+                console.error('Error playing sound:', error);
+                // Last resort: try playing without any configuration
+                try {
+                    const { sound } = await Audio.Sound.createAsync(audioFile);
+                    await sound.playAsync();
+                } catch (fallbackError) {
+                    console.error('Fallback sound play failed:', fallbackError);
+                }
+            }
+        }
 
     async function getBackFillDetails () {
         console.log("starting getBackfill");
@@ -58,14 +104,113 @@ const Prepare = ({navigation}) => {
             console.log("backfill error");
             console.error(err.message);
             console.log(err.response?.data?.reason);
-        } finally {
-
         }       
     }
 
+    async function getPendingBackfills () {
+        console.log("retrieving remaining backfills");
+    try {
+            const response = await axios.post('http://192.168.2.165/api/Order/getBackFillByEmployeeId' , {
+                token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+                employeeId: user.employeeID,
+            })
+
+            console.log("backfill success: ", response.data.success);
+            if (response.data.success && response.data.data.length > 0) {
+                dispatch(setIsReturning(true));
+                const orderPayload = [...new Set(response.data.data.map(item => item.orderId))]
+                .map(id => ({ orderId: id }));
+                dispatch(addBackfillOrderIds(orderPayload));
+                console.log("backfill success");
+                // dispatch(populateBackfill(response.data.data));
+                // console.log("response: ", response);
+                // dispatch(queueBackfill(response.data.data));
+                let pruneBackfill = [];
+                for (let i = 0; i < response.data.data.length; i++) {
+                    if (response.data.data[i].scannedQty < response.data.data[i].orderedQty) {
+                        pruneBackfill.push(response.data.data[i]);
+                    }
+
+                    if (response.data.data[i].pickCompleted === true) {
+                        dispatch(setPicksStarted(true));
+                    }
+                }
+                dispatch(queueBackfill(pruneBackfill));
+            } else {
+                if (hasMerge) {
+                    router.push('/picker/merge');
+                }
+            }
+        } catch (err) {
+            console.log("backfill recovery error");
+            console.error(err.message);
+            console.log(err.response?.data?.reason);
+        }
+    }
+
+async function getMergedBackfills () {
+    console.log("merged emp id: ", user.employeeID);
+    try {
+        const response = await axios.post('http://192.168.2.165/api/Order/getBackFillMergeByEmployeeId', {
+            token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+            employeeId: user.employeeID
+        });
+
+        if (response.data.success) {
+            if (response.data.data.length > 0) {
+                let pruneBackfill = [];
+                for (let i = 0; i < response.data.data.length; i++) {
+                    if (response.data.data[i].mergeCompleted === false) {
+                        pruneBackfill.push(response.data.data[i]);
+                    }
+                }
+                if (pruneBackfill.length > 0) {
+                    dispatch(queueBackfill(pruneBackfill));
+                    setHasMerge(true);
+                    console.log("getMerged: ", hasMerge);
+                }
+            }
+        } 
+    } catch (err) {
+        console.log("merge update error");
+        console.error(err.message);
+    }
+}
+
+
     useEffect(() => {
-       ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        getMergedBackfills();
+
+        let subscription;
+
+        const lockOrientation = async () => {
+            await ScreenOrientation.unlockAsync();
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        };
+
+        lockOrientation();
+
+        subscription = ScreenOrientation.addOrientationChangeListener(() => {
+            lockOrientation();
+        });
+
+        return () => {
+            if (subscription) {
+            ScreenOrientation.removeOrientationChangeListener(subscription);
+            }
+        };
     }, []);
+
+    useEffect(() => {
+        console.log("hasMerge: ", hasMerge);
+        if (hasMerge === false) {
+            getPendingBackfills();
+        }
+
+        if (hasMerge === true) {
+            router.push('/picker/merge');
+        }
+    }, [hasMerge])
 
     useEffect(() => {
         if (order.length >= 6) {
@@ -78,6 +223,9 @@ const Prepare = ({navigation}) => {
     useEffect(() => {
         if (container.length >= 6 && order.length >= 6) {
             dispatch(addOrder(order));
+            dispatch(addBackfillOrderIds({
+                orderId: order
+            }));
             dispatch(addContainer(container));
             dispatch(addBackfill({
                 OrderId: order,
@@ -94,12 +242,18 @@ const Prepare = ({navigation}) => {
     }, [backfillOrders])
 
     useEffect(() => {
-        // console.log("backfillItems: ", backfillItems);
-
-        if (backfillItems.length > 0 || orders.length > 0) {
+        if (backfillItems.length > 0 && hasMerge === false && picksStarted === true) {
+            console.log("backfillItems: ", backfillItems);
             router.push('/picker/backfill');
         }
     }, [backfillItems])
+
+    useEffect(() => {
+        if (initialBackfill.length > 0 && hasMerge === false) {
+            console.log("GO TO BACKFILL");
+            router.push('/picker/backfill');
+        }
+    }, [initialBackfill])
 
     useEffect(() => {
         if ((orders.length > 0 && containers.length > 0) && orders[orders.length - 1].length >= 6 && containers[containers.length - 1].length >= 6) {
@@ -134,7 +288,7 @@ const Prepare = ({navigation}) => {
                             </TouchableOpacity>
                         </View>
                     </View>
-                </Modal>
+            </Modal>
         </SafeAreaView>
         <SafeAreaView style={{...styles.container, position: 'absolute'}}>
             <Text style={{...styles.label, height: 45}}>Orders</Text>
@@ -159,9 +313,11 @@ const Prepare = ({navigation}) => {
                     onChangeText={(newVal) => {
                         if (orders.includes(newVal)) {
                             setErrorMsg("Order already added");
+                            playSound(buzzer);
                             setModalVisible(true);
                         } else if (containers.includes(newVal) || newVal === container) {
                             setErrorMsg("You scanned a container");
+                            playSound(buzzer);
                             setModalVisible(true);
                         } else {
                             setOrder(newVal);
@@ -178,9 +334,11 @@ const Prepare = ({navigation}) => {
                     onChangeText={(newVal) => {
                         if (orders.includes(newVal) || newVal === order) {
                             setErrorMsg("You scanned an order");
+                            playSound(buzzer);
                             setModalVisible(true);
                         } else if (containers.includes(newVal)) {
                             setErrorMsg("Container already added");
+                            playSound(buzzer);
                             setModalVisible(true);
                         } else {
                             setContainer(newVal);
