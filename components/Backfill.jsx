@@ -1,6 +1,7 @@
 import axios from 'axios';
 import { Audio } from 'expo-av';
 import { router } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -137,6 +138,25 @@ const Backfill = ({navigation}) => {
                 setRequiredOrders(prevId => [...prevId, String(item.orderId)]);
             }
         })
+
+        let subscription;
+
+        const lockOrientation = async () => {
+            await ScreenOrientation.unlockAsync();
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        };
+
+        lockOrientation();
+
+        subscription = ScreenOrientation.addOrientationChangeListener(() => {
+            lockOrientation();
+        });
+
+        return () => {
+            if (subscription) {
+                ScreenOrientation.removeOrientationChangeListener(subscription);
+            }
+        };
     }, [])
 
     useEffect(() => {

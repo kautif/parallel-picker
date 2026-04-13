@@ -3,7 +3,7 @@ import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Alert, Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addArrangedBackfillObj, resetParallelState } from '../../ParallelPicker/app/redux/parallelSlice';
@@ -194,8 +194,25 @@ const Merge = () => {
     }
 
     useEffect(() => {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
-    });
+        let subscription;
+
+        const lockOrientation = async () => {
+            await ScreenOrientation.unlockAsync();
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        };
+
+        lockOrientation();
+
+        subscription = ScreenOrientation.addOrientationChangeListener(() => {
+            lockOrientation();
+        });
+
+        return () => {
+            if (subscription) {
+            ScreenOrientation.removeOrientationChangeListener(subscription);
+            }
+        };
+    }, []);
 
     useEffect(() => {
         console.log("MERGE: ", backfillItems);
