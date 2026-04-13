@@ -1,12 +1,12 @@
 import axios from 'axios';
+import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Modal, StyleSheet, Text, TextInput, TouchableOpacity, View, Platform } from 'react-native';
+import { Image, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../app/redux/parallelSlice';
-import { Audio } from 'expo-av';
 
 // Version 0.1
 // 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
@@ -21,6 +21,7 @@ const Prepare = ({navigation}) => {
     const [modalVisible, setModalVisible] = useState(false);
     const [errorMsg, setErrorMsg] = useState("");
     const [hasMerge, setHasMerge] = useState(false);
+    const [logoutVisible, setLogoutVisible] = useState(false);
     // const [picksStarted, setPicksStarted] = useState(false);
 
     const orderRef = useRef('');
@@ -34,44 +35,45 @@ const Prepare = ({navigation}) => {
     const mergedBackfills = useSelector(state => state.parallel.mergedBackfills);
 
     const buzzer = require('../../WarehouseScanner/assets/sounds/buzzer.mp3');
+    const logoutDoor = require('../../WarehouseScanner/assets/images/logout_door.png');
 
-       async function playSound (audioFile) {
-            try {
-                // Method 1: Expo Audio reconfiguration
-                await Audio.setAudioModeAsync({
-                    allowsRecordingIOS: false,
-                    staysActiveInBackground: false,
-                    playsInSilentModeIOS: true,
-                    shouldDuckAndroid: true,
-                    playThroughEarpieceAndroid: false,
-                });
-    
-                // Method 2: Native module (if available)
-                if (Platform.OS === 'android' && AudioRouter) {
-                    try {
-                        await AudioRouter.forceSpeakerOutput();
-                    } catch (nativeError) {
-                        console.log('Native audio routing failed in playSound:', nativeError.message);
-                    }
-                }
-                
-                const { sound } = await Audio.Sound.createAsync(audioFile);
-                setSound(sound);
-                
-                // Set volume to max to ensure it's audible
-                await sound.setVolumeAsync(1.0);
-                await sound.playAsync();
-            } catch (error) {
-                console.error('Error playing sound:', error);
-                // Last resort: try playing without any configuration
+    async function playSound (audioFile) {
+        try {
+            // Method 1: Expo Audio reconfiguration
+            await Audio.setAudioModeAsync({
+                allowsRecordingIOS: false,
+                staysActiveInBackground: false,
+                playsInSilentModeIOS: true,
+                shouldDuckAndroid: true,
+                playThroughEarpieceAndroid: false,
+            });
+
+            // Method 2: Native module (if available)
+            if (Platform.OS === 'android' && AudioRouter) {
                 try {
-                    const { sound } = await Audio.Sound.createAsync(audioFile);
-                    await sound.playAsync();
-                } catch (fallbackError) {
-                    console.error('Fallback sound play failed:', fallbackError);
+                    await AudioRouter.forceSpeakerOutput();
+                } catch (nativeError) {
+                    console.log('Native audio routing failed in playSound:', nativeError.message);
                 }
             }
+            
+            const { sound } = await Audio.Sound.createAsync(audioFile);
+            setSound(sound);
+            
+            // Set volume to max to ensure it's audible
+            await sound.setVolumeAsync(1.0);
+            await sound.playAsync();
+        } catch (error) {
+            console.error('Error playing sound:', error);
+            // Last resort: try playing without any configuration
+            try {
+                const { sound } = await Audio.Sound.createAsync(audioFile);
+                await sound.playAsync();
+            } catch (fallbackError) {
+                console.error('Fallback sound play failed:', fallbackError);
+            }
         }
+    }
 
     async function getBackFillDetails () {
         console.log("starting getBackfill");
@@ -107,6 +109,33 @@ const Prepare = ({navigation}) => {
         }       
     }
 
+    const handleLogout = async () => {
+        try {
+            // console.log("=== LOGOUT START ===");
+            // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
+            // console.log(`Total effect instances created: ${effectCountRef.current}`);
+            // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
+
+            if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
+                console.log("logout qty updated");
+                // await updateQty(); // ensure update completes
+            }
+            dispatch(clearUser());  
+            orderIdRef.current = '';
+            dispatch(setUsername(''));
+            setLogoutVisible(false);
+        } catch (err) {
+
+        }
+        // navigation.navigate('Scan');
+        // navigation.reset({
+        //     index: 0,
+        //     routes: [{ name: 'Scan' }],
+        // });
+
+        router.replace('/');
+    };
+
     async function getPendingBackfills () {
         console.log("retrieving remaining backfills");
     try {
@@ -118,6 +147,7 @@ const Prepare = ({navigation}) => {
             console.log("backfill success: ", response.data.success);
             if (response.data.success && response.data.data.length > 0) {
                 dispatch(setIsReturning(true));
+                dispatch(setPicksStarted(true));
                 const orderPayload = [...new Set(response.data.data.map(item => item.orderId))]
                 .map(id => ({ orderId: id }));
                 dispatch(addBackfillOrderIds(orderPayload));
@@ -132,7 +162,7 @@ const Prepare = ({navigation}) => {
                     }
 
                     if (response.data.data[i].pickCompleted === true) {
-                        dispatch(setPicksStarted(true));
+                        // dispatch(setPicksStarted(true));
                     }
                 }
                 dispatch(queueBackfill(pruneBackfill));
@@ -271,6 +301,56 @@ async function getMergedBackfills () {
             <Modal
                 animationType="slide"
                 transparent={true}
+                visible={logoutVisible}>
+                <TouchableOpacity
+                    style={{
+                        backgroundColor: 'black',
+                        position: 'absolute',
+                        padding: 15,
+                        borderRadius: 15
+                    }}
+                    onPress={() => {
+                        setLogoutVisible(false);
+                    }}
+                    >
+                    <Text style={{ color: 'white', fontSize: 30}}>X</Text>
+                </TouchableOpacity>
+                <View style={styles.centeredView}>
+                    <View style={{...styles.modalView, width: 500, padding: 0, flexWrap: 'wrap', flexDirection: 'row'}}>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Lunch</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderTopWidth: 2, borderBottomWidth: 1, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Break</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, borderBottomWidth: 2, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Bathroom</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Clean</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                animationType="slide"
+                transparent={true}
                 visible={modalVisible}
                 onRequestClose={() => {
                     setErrorMsg("");
@@ -353,6 +433,30 @@ async function getMergedBackfills () {
                 <Text style={styles.buttonText}>Next</Text>
             </TouchableOpacity>
         </View>
+        <TouchableOpacity
+            style={{
+                position: 'absolute',
+                top: 25,
+                right: 0,
+                // backgroundColor: '#d61a1a',
+                paddingHorizontal: 15,
+                paddingVertical: 10
+            }}
+            onPress={() => {
+                setLogoutVisible(true);
+            }}
+            >
+            <Image 
+                style={{width: 50, height: 50}}
+                source={logoutDoor}
+            />
+            {/* <Text
+                style={{
+                    fontSize: 20,
+                    color: 'white'
+            }}
+            >Logout</Text> */}
+        </TouchableOpacity>
     </SafeAreaView>
     )
 }

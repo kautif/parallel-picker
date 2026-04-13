@@ -35,7 +35,7 @@ const parallelSlice = createSlice({
             console.log("order index: ", action.payload);
         },
         removeContainer: (state, action) => {
-            // state.containers.splice(action.payload, 1);
+            state.containers.splice(action.payload, 1);
         },
         populateBackfill: (state, action) => {
             state.initialBackfill = action.payload;

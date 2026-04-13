@@ -48,6 +48,7 @@ const Backfill = ({navigation}) => {
     const [modalVisible, setModalVisible] = useState(false);
     const [bfModalVisible, setBfModalVisible] = useState(false);
     const [showKeyboard, setShowKeyboard] = useState(false);
+    const [logoutVisible, setLogoutVisible] = useState(false);
     const [sound, setSound] = useState();
 
     const dispatch = useDispatch();
@@ -74,10 +75,11 @@ const Backfill = ({navigation}) => {
     const scanContainerSound = require('../../WarehouseScanner/assets/sounds/scan_container.mp3');
     const wrongLocation = require('../../WarehouseScanner/assets/sounds/wrong_location.mp3');
     const wrongItem = require('../../WarehouseScanner/assets/sounds/wrong_item.mp3');
-    const scanContainerFail = require('../../WarehouseScanner/assets/sounds/did_not_scan_container.mp3');
+    const scanContainerFail = require('../../WarehouseScanner/assets/sounds/wrong_container.mp3');
     const backfillDoneSound = require('../../WarehouseScanner/assets/sounds/backfill_completed.mp3');
     const loadingAnim = require('../../WarehouseScanner/assets/images/loading.webp');
     const editIcon = require('../../WarehouseScanner/assets/images/edit.png');
+    const logoutDoor = require('../../WarehouseScanner/assets/images/logout_door.png');
 
     useEffect(() => {
         // playSound(nextItem);
@@ -256,6 +258,33 @@ const Backfill = ({navigation}) => {
         }
     }
 
+    const handleLogout = async () => {
+        try {
+            // console.log("=== LOGOUT START ===");
+            // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
+            // console.log(`Total effect instances created: ${effectCountRef.current}`);
+            // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
+
+            if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
+                console.log("logout qty updated");
+                // await updateQty(); // ensure update completes
+            }
+            dispatch(clearUser());  
+            orderIdRef.current = '';
+            dispatch(setUsername(''));
+            setLogoutVisible(false);
+        } catch (err) {
+
+        }
+        // navigation.navigate('Scan');
+        // navigation.reset({
+        //     index: 0,
+        //     routes: [{ name: 'Scan' }],
+        // });
+
+        router.replace('/');
+    };
+
     const updateQty = useCallback(async () => {
         console.log("UPDATING backfill quantity");
         console.log("employee id: ", user.employeeID);
@@ -400,6 +429,56 @@ const Backfill = ({navigation}) => {
                         </TouchableOpacity>
                     </View>
                 </TouchableOpacity>
+            </Modal>
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={logoutVisible}>
+                <TouchableOpacity
+                    style={{
+                        backgroundColor: 'black',
+                        position: 'absolute',
+                        padding: 15,
+                        borderRadius: 15
+                    }}
+                    onPress={() => {
+                        setLogoutVisible(false);
+                    }}
+                    >
+                    <Text style={{ color: 'white', fontSize: 30}}>X</Text>
+                </TouchableOpacity>
+                <View style={styles.centeredView}>
+                    <View style={{...styles.modalView, width: 500, padding: 0, flexWrap: 'wrap', flexDirection: 'row'}}>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Lunch</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderTopWidth: 2, borderBottomWidth: 1, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Break</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, borderBottomWidth: 2, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Bathroom</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity 
+                            style={{width: '50%', borderColor: 'black', borderWidth: 2, padding: 50}}
+                            onPress={() => {
+                                handleLogout();
+                            }}>
+                            <Text style={{...styles.modalText, fontSize: 30}}>Clean</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
             </Modal>
             <Modal
             animationType="slide"
@@ -578,32 +657,26 @@ const Backfill = ({navigation}) => {
                         <View style={{flexDirection: 'row', width: 300, marginHorizontal: 'auto'}}>
                             <TextInput
                                 style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1}}
-                                useRef={scanLocRef}
+                                ref={scanLocRef}
                                 onChangeText={async (newVal) => {
                                     console.log("onChangeText called - newVal:", newVal, "showKeyboard:", showKeyboard);
                                     
                                     // Store value in ref for keyboard validation
                                     if (showKeyboard === true) {
                                         scannedLocValueRef.current = newVal;
-                                        
+                                        setScannedLoc(newVal);
                                         // Validate keyboard input when it reaches expected length
-                                        if (!orderedLocs.includes(newVal)) {
-                                            // console.log("LOGGING BAD SCAN - keyboard entry (real-time)");
-                                            // await BadScanLogger.logBadScan({
-                                            //     employeeId: user.employeeID || 'N/A',
-                                            //     employeeName: user.employeeName || username || 'Unknown',
-                                            //     scanType: 'Location',
-                                            //     expected: orderedLocs,
-                                            //     scanned: newVal
-                                            // });
-                                            
-                                            setErrorMsg(`Incorrect Location \n ${newVal}`);
-                                            playSound(wrongLocation);
-                                            setModalVisible(true);
+
+                                        if (orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
+                                            // Keyboard is enabled - just update the text field
+                                            console.log("Setting scannedLoc (keyboard enabled):", newVal);
+                                            setSno(backfillItems[0].sNo);
+                                            setAtLocation(true);
+                                            // playSound(nextItem);
                                         }
                                     }
                                     
-                                    if (showKeyboard === false && !orderedLocs.includes(newVal)) {
+                                    if (showKeyboard === false && !orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
                                         // Log the bad location scan (wrong location, same length)
                                         // await BadScanLogger.logBadScan({
                                         //     employeeId: user.employeeID || 'N/A',
@@ -615,12 +688,12 @@ const Backfill = ({navigation}) => {
                                         
                                         setErrorMsg(`Incorrect Location \n ${newVal}`);
                                         playSound(wrongLocation);
-                                        setScannedLoc("");
+                                        // setScannedLoc("");
                                         setModalVisible(true);
                                         // setTimeout(() => {
                                         //     setModalVisible(false);
                                         // }, 2000)
-                                    } else if (showKeyboard === false && !orderedLocs.includes(newVal)) {
+                                    } else if (showKeyboard === false && !orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
                                         // Log bad scan for wrong length (e.g., badge instead of location)
                                         // await BadScanLogger.logBadScan({
                                         //     employeeId: user.employeeID || 'N/A',
@@ -632,7 +705,7 @@ const Backfill = ({navigation}) => {
                                         
                                         setErrorMsg(`Incorrect Location \n ${newVal}`);
                                         playSound(wrongLocation);
-                                        setScannedLoc("");
+                                        // setScannedLoc("");
                                         setModalVisible(true);
                                     } else if (showKeyboard === false && orderedLocs.includes(newVal)) {
                                         // Correct location scanned
@@ -642,19 +715,12 @@ const Backfill = ({navigation}) => {
                                         setAtLocation(true);
                                         // playSound(nextItem);
                                         // setTotalLocationsScanned(prevItems => prevItems + 1);
-                                    } else if (showKeyboard === true && orderedLocs.includes(newVal)) {
-                                        // Keyboard is enabled - just update the text field
-                                        console.log("Setting scannedLoc (keyboard enabled):", newVal);
-                                        setScannedLoc(newVal);
-                                        setSno(backfillItems[0].sNo);
-                                        setAtLocation(true);
-                                        // playSound(nextItem);
                                     }
                                 }}
                                 onBlur={async () => {
                                     console.log("onBlur called - scannedLoc:", scannedLoc, "orderedLocs:", orderedLocs);
                                     // Validate when field loses focus (keyboard entry complete)
-                                    if (showKeyboard && !orderedLocs.at(scannedLoc)) {
+                                    if (showKeyboard && !orderedLocs.at(scannedLoc) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
                                         console.log("LOGGING BAD SCAN - keyboard onBlur");
                                         // await BadScanLogger.logBadScan({
                                         //     employeeId: user.employeeID || 'N/A',
@@ -1005,6 +1071,30 @@ const Backfill = ({navigation}) => {
                     </View>
                 </View>            
             </SafeAreaView>}
+            <TouchableOpacity
+                style={{
+                    position: 'absolute',
+                    top: 25,
+                    right: 0,
+                    // backgroundColor: '#d61a1a',
+                    paddingHorizontal: 15,
+                    paddingVertical: 10
+                }}
+                onPress={() => {
+                    setLogoutVisible(true);
+                }}
+                >
+                <Image 
+                    style={{width: 50, height: 50}}
+                    source={logoutDoor}
+                />
+                {/* <Text
+                    style={{
+                        fontSize: 20,
+                        color: 'white'
+                }}
+                >Logout</Text> */}
+            </TouchableOpacity>
         </SafeAreaView>   
     )
 }

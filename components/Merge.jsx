@@ -3,7 +3,7 @@ import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Alert, Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addArrangedBackfillObj, resetParallelState } from '../../ParallelPicker/app/redux/parallelSlice';
@@ -31,6 +31,8 @@ const Merge = () => {
     const [orders, setOrders] = useState([]);
     const [ordersArr, setOrdersArr] = useState([]);
     const [scanText, setScanText] = useState("");
+    const [orderText, setOrderText] = useState("");
+    const [containerText, setContainerText] = useState("");
     const [mergeArr, setMergeArr] = useState([]);
     const [mergeMsg, setMergeMsg] = useState("");
     const [errorMsg, setErrorMsg] = useState("");
@@ -38,8 +40,14 @@ const Merge = () => {
     const [sound, setSound] = useState();
 
     const [modalVisible, setModalVisible] = useState(false);
+    const [orderVisible, setOrderVisible] = useState(false);
+    const [containerVisible, setContainerVisible] = useState(false);
+    const [destContainerVisible, setDestContainerVisible] = useState(false);
+    const [destContainerText, setDestContainerText] = useState("");
+    const [destContainerError, setDestContainerError] = useState("");
     const [errorVisible, setErrorVisible] = useState(false);
     const mergeArrBuilt = useRef(false);
+    const pendingMergeItem = useRef(null);
 
     // Plain array instead of Set — reliable React re-renders
     const [mergedOrders, setMergedOrders] = useState([]);
@@ -56,7 +64,7 @@ const Merge = () => {
         Animated.sequence([
             Animated.timing(toastOpacity, { toValue: 1, duration: 200, useNativeDriver: true }),
             Animated.delay(2000),
-            Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true }),
+            Animated.timing(toastOpacity, { toValue: 0, duration: 300, useNativeDriver: true })
         ]).start();
     }
 
@@ -104,6 +112,10 @@ const Merge = () => {
             return;
         }
         setCurrentOrder(i);
+        setOrderText("");
+        setContainerText("");
+        setOrderVisible(true);
+        setModalVisible(true);
     }
 
     // async function getBackFillDetails() {
@@ -154,7 +166,7 @@ const Merge = () => {
         }
     }
 
-    async function updateMergedItem(item) {
+    async function updateMergedItem(item, destBarcode) {
         try {
             const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillItemMerge', {
                 token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
@@ -164,7 +176,7 @@ const Merge = () => {
                 scannedQty: item.mergedQty,
                 containerItems: [
                     {
-                        containerBarcode: item.containerBarcode,
+                        containerBarcode: destBarcode,
                         qty: item.mergedQty
                     }
                 ]
@@ -202,6 +214,98 @@ const Merge = () => {
             return () => backHandler.remove();
     }, []);
 
+    useEffect(() => {
+        if (!orderVisible || orderText.length === 0) return;
+
+        const expectedOrder = String(orders[currentOrder]);
+        const scanned = orderText.trim();
+
+        if (scanned === expectedOrder) {
+            setOrderText("");
+            setOrderVisible(false);
+            setContainerVisible(true);
+        } else {
+            showToast("Wrong order scanned. Try again.");
+            setOrderText("");
+        }
+    }, [orderText])
+
+    useEffect(() => {
+        if (!containerVisible || containerText.length === 0) return;
+
+        const scanned = containerText.trim();
+        const orderItems = ordersArr[currentOrder]?.order ?? [];
+        const expectedBarcode = orderItems[0]?.containerBarcode;
+
+        if (scanned === expectedBarcode) {
+            setContainerText("");
+            setContainerVisible(false);
+            setModalVisible(false);
+        } else {
+            showToast("Wrong container scanned. Try again.");
+            setContainerText("");
+        }
+    }, [containerText])
+
+    useEffect(() => {
+        if (!destContainerVisible || destContainerText.length === 0) return;
+
+        const pending = pendingMergeItem.current;
+        if (!pending) return;
+
+        const scanned = destContainerText.trim();
+        const { item, currentOrderId, currentOrderLabel, updated } = pending;
+
+        const allLocations = new Set(
+            mergeArr.flatMap(i => [i.location, i.binLocation, i.pickLocation].filter(Boolean))
+        );
+        const allSkus = new Set(
+            mergeArr.flatMap(i => [
+                ...i.possibleScans,
+                ...i.upcList.map(u => u.upc)
+            ])
+        );
+        const allContainers = new Set(
+            mergeArr.map(i => i.containerBarcode).filter(Boolean)
+        );
+
+        if (allLocations.has(scanned)) {
+            setDestContainerError("Invalid: cannot use a location as destination container.");
+            setDestContainerText("");
+            return;
+        }
+        if (allSkus.has(scanned)) {
+            setDestContainerError("Invalid: cannot use an item SKU as destination container.");
+            setDestContainerText("");
+            return;
+        }
+        if (allContainers.has(scanned)) {
+            setDestContainerError("Invalid: cannot use an order container as destination container.");
+            setDestContainerText("");
+            return;
+        }
+
+        updateMergedItem(item, scanned).then(() => {
+            pendingMergeItem.current = null;
+            setDestContainerText("");
+            setDestContainerError("");
+            setDestContainerVisible(false);
+
+            const orderStillHasItems = updated.some(
+                i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
+            );
+
+            if (!orderStillHasItems) {
+                setMergedOrders(prev => [...prev, currentOrderLabel]);
+                setMergeMsg(`${currentOrderLabel} merged`);
+                setCurrentOrder(null);
+                setModalVisible(true);
+            } else {
+                setModalVisible(false);
+            }
+        });
+    }, [destContainerText])
+
     // useEffect(() => {
     //     if (backfillsArranged.length > 0) {
     //         const uniqueOrderIds = [...new Set(backfillsArranged.map(item => item.orderId))];
@@ -220,6 +324,7 @@ const Merge = () => {
     // }, [backfillsArranged])
 
     useEffect(() => {
+        console.log("arranged: ", backfillsArranged);
         if (backfillsArranged.length > 0) {
             const flatItems = backfillsArranged.flat().filter(
                 (item, index, self) =>
@@ -240,6 +345,20 @@ const Merge = () => {
             }, []);
 
             setOrdersArr(grouped);
+
+            const alreadyMerged = grouped
+                .filter(obj => obj.order.every(item => item.mergeCompleted === true))
+                .map(obj => obj.orderId);
+
+            if (alreadyMerged.length > 0) {
+                setMergedOrders(prev => {
+                    const combined = [...prev];
+                    alreadyMerged.forEach(id => {
+                        if (!combined.includes(id)) combined.push(id);
+                    });
+                    return combined;
+                });
+            }
         }
     }, [backfillsArranged]);
 
@@ -297,6 +416,7 @@ const Merge = () => {
     // }, [ordersArr]);
 
     useEffect(() => {
+        console.log("OrdersArr: ", ordersArr[0]);
         if (ordersArr.length === 0 || mergeArrBuilt.current) return;
 
         mergeArrBuilt.current = true;
@@ -320,6 +440,8 @@ const Merge = () => {
             })),
             scannedQty: item.scannedQty,
             mergedQty: 0,
+            location: item.location,
+            binLocation: item.binLocation,
             pickLocation: item.pickLocation,
             containerBarcode: item.containerBarcode
         })) : [];
@@ -399,18 +521,11 @@ const Merge = () => {
             updated[matchIndex] = matched;
 
 if (matched.mergedQty === matched.scannedQty) {
-    updateMergedItem(matched).then(() => {
-        const orderStillHasItems = updated.some(
-            item => parseInt(item.orderId) === currentOrderId && item.mergedQty < item.scannedQty
-        );
-
-        if (!orderStillHasItems) {
-            setMergedOrders(prev => [...prev, currentOrderLabel]);
-            setMergeMsg(`${currentOrderLabel} merged`);
-            setCurrentOrder(null);
-            setModalVisible(true);
-        }
-    });
+    pendingMergeItem.current = { item: matched, currentOrderId, currentOrderLabel, updated };
+    setDestContainerText("");
+    setDestContainerError("");
+    setDestContainerVisible(true);
+    setModalVisible(true);
 }
 
             return updated;
@@ -424,6 +539,8 @@ if (matched.mergedQty === matched.scannedQty) {
             {orders.length > 0 && orders.map((order, i) => {
                 if (currentOrder !== null) return null;
                 const isMerged = mergedOrders.includes(order);
+                const orderItems = ordersArr[i]?.order ?? [];
+                const isInProgress = !isMerged && orderItems.some(item => item.mergeCompleted === true);
                 return (
                     <TouchableOpacity key={order} onPress={() => handleOrderPress(i, order)}>
                         <View style={styles.orderRow}>
@@ -433,6 +550,9 @@ if (matched.mergedQty === matched.scannedQty) {
                             {isMerged && (
                                 <Text style={styles.checkmark}>✓</Text>
                             )}
+                            {isInProgress && (
+                                <Text style={styles.inProgress}>⏳</Text>
+                            )}
                         </View>
                     </TouchableOpacity>
                 );
@@ -440,7 +560,7 @@ if (matched.mergedQty === matched.scannedQty) {
             <Modal
                 animationType="slide"
                 transparent={true}
-                visible={modalVisible || errorVisible}
+                visible={modalVisible || errorVisible || orderVisible || containerVisible || destContainerVisible}
                 onRequestClose={() => {
                     setMergeMsg("");
                     setModalVisible(false);
@@ -449,16 +569,11 @@ if (matched.mergedQty === matched.scannedQty) {
                 }}
             >
                 <View style={styles.centeredView}>
-                    <View style={styles.modalView}>
+                    {(orderVisible === false && containerVisible === false && destContainerVisible === false) && <View style={styles.modalView}>
                         <Text style={styles.modalText}>{mergeMsg || errorMsg}</Text>
                         <TouchableOpacity
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={() => {
-                                setMergeMsg("");
-                                setModalVisible(false);
-                                setErrorMsg("");
-                                setErrorVisible(false);
-
                                 if (mergedOrders.length === orders.length) {
                                     setMergeMsg("");
                                     setModalVisible(false);
@@ -475,7 +590,45 @@ if (matched.mergedQty === matched.scannedQty) {
                         >
                             <Text style={{color: 'white', fontSize: 20}}>Close</Text>
                         </TouchableOpacity>
-                    </View>
+                    </View>}
+                    {orderVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
+                        <Text style={styles.modalText}>Verify Order</Text>
+                        <Text style={styles.modalText}>Scan order {orders[currentOrder]}</Text>
+                        <TextInput
+                            style={styles.TextInput}
+                            autoFocus={true}
+                            showSoftInputOnFocus={false}
+                            onChangeText={(newVal) => setOrderText(newVal)}
+                            value={orderText}
+                        />
+                    </View>}
+                    {containerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}hmmm>
+                        <Text style={styles.modalText}>Verify Container</Text>
+                        <Text style={styles.modalText}>
+                            Expected: {ordersArr[currentOrder]?.order?.[0]?.containerBarcode}
+                        </Text>
+                        <TextInput
+                            style={styles.TextInput}
+                            autoFocus={true}
+                            showSoftInputOnFocus={false}
+                            onChangeText={(newVal) => setContainerText(newVal)}
+                            value={containerText}
+                        />
+                    </View>}
+                    {destContainerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
+                        <Text style={styles.modalText}>Scan Destination Container</Text>
+                        <Text style={styles.modalText}>{pendingMergeItem.current?.item?.description}</Text>
+                        {destContainerError.length > 0 && (
+                            <Text style={{color: 'red', fontSize: 16, marginTop: 8, textAlign: 'center'}}>{destContainerError}</Text>
+                        )}
+                        <TextInput
+                            style={styles.TextInput}
+                            autoFocus={true}
+                            showSoftInputOnFocus={false}
+                            onChangeText={(newVal) => setDestContainerText(newVal)}
+                            value={destContainerText}
+                        />
+                    </View>}
                 </View>
             </Modal>
             {currentOrder !== null && ordersArr[currentOrder] &&
@@ -506,12 +659,12 @@ if (matched.mergedQty === matched.scannedQty) {
                 >
                     <Text style={styles.clearButtonText}>Clear</Text>
                 </TouchableOpacity>
-                <TouchableOpacity
+                {/* <TouchableOpacity
                     style={{...styles.clearButton, ...styles.cancelButton}}
                     onPress={() => setCurrentOrder(null)}
                 >
                     <Text style={styles.clearButtonText}>Back</Text>
-                </TouchableOpacity>
+                </TouchableOpacity> */}
             </View>
             <ScrollView style={styles.rightPanel}>
                 {mergeArr.length > 0 && mergeArr
@@ -556,6 +709,11 @@ const styles = StyleSheet.create({
         marginLeft: 10,
         marginBottom: 30,
         fontWeight: 'bold',
+    },
+    inProgress: {
+        fontSize: 28,
+        marginLeft: 10,
+        marginBottom: 30,
     },
     TextInput: {
         width: 200,
@@ -637,7 +795,8 @@ const styles = StyleSheet.create({
     },
     toast: {
         position: 'absolute',
-        bottom: 40,
+        bottom: -60,
+        left: 200,
         alignSelf: 'center',
         backgroundColor: 'rgba(0, 0, 0, 0.75)',
         paddingHorizontal: 24,
