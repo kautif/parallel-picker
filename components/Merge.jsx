@@ -47,6 +47,7 @@ const Merge = () => {
     const [destContainerError, setDestContainerError] = useState("");
     const [errorVisible, setErrorVisible] = useState(false);
     const mergeArrBuilt = useRef(false);
+    const mergeCompletedRef = useRef(false);
     const pendingMergeItem = useRef(null);
 
     // Plain array instead of Set — reliable React re-renders
@@ -166,7 +167,7 @@ const Merge = () => {
         }
     }
 
-    async function updateMergedItem(item, destBarcode) {
+    async function updateMergedItem(item, containerItems) {
         try {
             const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillItemMerge', {
                 token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
@@ -174,12 +175,7 @@ const Merge = () => {
                 orderBackFillItemsId: item.orderBackFillItemsId,
                 pickLocation: item.pickLocation,
                 scannedQty: item.mergedQty,
-                containerItems: [
-                    {
-                        containerBarcode: destBarcode,
-                        qty: item.mergedQty
-                    }
-                ]
+                containerItems
             });
 
             if (response.data.success) {
@@ -271,7 +267,7 @@ const Merge = () => {
         if (!pending) return;
 
         const scanned = destContainerText.trim();
-        const { item, currentOrderId, currentOrderLabel, updated } = pending;
+        const { item, matchIndex, increment, currentOrderId, currentOrderLabel, updated } = pending;
 
         const allLocations = new Set(
             mergeArr.flatMap(i => [i.location, i.binLocation, i.pickLocation].filter(Boolean))
@@ -302,25 +298,51 @@ const Merge = () => {
             return;
         }
 
-        updateMergedItem(item, scanned).then(() => {
-            pendingMergeItem.current = null;
-            setDestContainerText("");
-            setDestContainerError("");
-            setDestContainerVisible(false);
+        // Upsert into containerItems: increment qty if barcode already exists, else add new entry
+        const existingContainerIndex = item.containerItems.findIndex(
+            c => c.containerBarcode === scanned
+        );
+        const updatedContainerItems = [...item.containerItems];
+        if (existingContainerIndex !== -1) {
+            updatedContainerItems[existingContainerIndex] = {
+                ...updatedContainerItems[existingContainerIndex],
+                qty: updatedContainerItems[existingContainerIndex].qty + increment
+            };
+        } else {
+            updatedContainerItems.push({ containerBarcode: scanned, qty: increment });
+        }
 
-            const orderStillHasItems = updated.some(
-                i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
-            );
+        // Write the updated containerItems back onto the item in mergeArr
+        const updatedItem = { ...item, containerItems: updatedContainerItems };
+        const updatedArr = [...updated];
+        updatedArr[matchIndex] = updatedItem;
 
-            if (!orderStillHasItems) {
-                setMergedOrders(prev => [...prev, currentOrderLabel]);
-                setMergeMsg(`${currentOrderLabel} merged`);
-                setCurrentOrder(null);
-                setModalVisible(true);
-            } else {
-                setModalVisible(false);
-            }
-        });
+        setMergeArr(updatedArr);
+
+        pendingMergeItem.current = null;
+        setDestContainerText("");
+        setDestContainerError("");
+        setDestContainerVisible(false);
+
+        // Only call the API once all quantities for this item have been assigned
+        if (updatedItem.mergedQty === updatedItem.scannedQty) {
+            updateMergedItem(updatedItem, updatedContainerItems).then(() => {
+                const orderStillHasItems = updatedArr.some(
+                    i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
+                );
+
+                if (!orderStillHasItems) {
+                    setMergedOrders(prev => [...prev, currentOrderLabel]);
+                    setMergeMsg(`${currentOrderLabel} merged`);
+                    setCurrentOrder(null);
+                    setModalVisible(true);
+                } else {
+                    setModalVisible(false);
+                }
+            });
+        } else {
+            setModalVisible(false);
+        }
     }, [destContainerText])
 
     // useEffect(() => {
@@ -346,9 +368,9 @@ const Merge = () => {
             const flatItems = backfillsArranged.flat().filter(
                 (item, index, self) =>
                     index === self.findIndex(i => i.orderBackFillItemsId === item.orderBackFillItemsId)
-            );
+            ).map(item => ({ ...item, orderId: String(item.orderId) }));
 
-            const uniqueOrderIds = [...new Set(flatItems.map(item => item.orderId))];
+            const uniqueOrderIds = [...new Set(flatItems.map(item => String(item.orderId)))];
             setOrders(uniqueOrderIds);
 
             const grouped = flatItems.reduce((acc, item) => {
@@ -457,6 +479,7 @@ const Merge = () => {
             })),
             scannedQty: item.scannedQty,
             mergedQty: 0,
+            containerItems: [],
             location: item.location,
             binLocation: item.binLocation,
             pickLocation: item.pickLocation,
@@ -484,8 +507,8 @@ const Merge = () => {
 
     useEffect(() => {
         if (orders.length > 0 && mergedOrders.length === orders.length) {
-            // all orders merged
-            dispatch(resetParallelState());
+            if (mergeCompletedRef.current) return;
+            mergeCompletedRef.current = true;
             playSound(mergeDone);
             setMergeMsg("All orders have been successfully merged!");
             setModalVisible(true);
@@ -527,23 +550,29 @@ const Merge = () => {
             const upcListMatch = matched.upcList.find(u => u.upc === scanText);
             const increment = upcListMatch ? upcListMatch.multiplier : 1;
 
-
             if (matched.mergedQty + increment > matched.scannedQty) {
                 setErrorMsg(`Cannot exceed expected quantity of ${matched.scannedQty}`);
                 setModalVisible(true);
                 setScanText("");
-                return prev; // return unchanged array
+                return prev;
             }
+
             matched.mergedQty += increment;
             updated[matchIndex] = matched;
 
-if (matched.mergedQty === matched.scannedQty) {
-    pendingMergeItem.current = { item: matched, currentOrderId, currentOrderLabel, updated };
-    setDestContainerText("");
-    setDestContainerError("");
-    setDestContainerVisible(true);
-    setModalVisible(true);
-}
+            // Always prompt for a destination container after every individual scan
+            pendingMergeItem.current = {
+                item: matched,
+                matchIndex,
+                increment,
+                currentOrderId,
+                currentOrderLabel,
+                updated
+            };
+            setDestContainerText("");
+            setDestContainerError("");
+            setDestContainerVisible(true);
+            setModalVisible(true);
 
             return updated;
         });
@@ -592,6 +621,7 @@ if (matched.mergedQty === matched.scannedQty) {
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={() => {
                                 if (mergedOrders.length === orders.length) {
+                                    dispatch(resetParallelState());
                                     setMergeMsg("");
                                     setModalVisible(false);
                                     setErrorMsg("");

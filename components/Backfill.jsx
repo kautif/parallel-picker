@@ -6,6 +6,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
+import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 import { addArrangedBackfillItem, addArrangedBackfillObj, addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 
@@ -47,6 +48,7 @@ const Backfill = ({navigation}) => {
 
     const [itemDescriptionVisible, setItemDescriptionVisible] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
+    const [notHaveVisible, setNotHaveVisible] = useState(false);
     const [bfModalVisible, setBfModalVisible] = useState(false);
     const [showKeyboard, setShowKeyboard] = useState(false);
     const [logoutVisible, setLogoutVisible] = useState(false);
@@ -68,8 +70,14 @@ const Backfill = ({navigation}) => {
     const itemRef = useRef(null);
     const scannedLocValueRef = useRef('');
     const isUpdatingQty = useRef(false);
+    const backfillCompletedRef = useRef(false);
 
     const { AudioRouter } = NativeModules;
+
+    const backfillOrderIdsRef = useRef(backfillOrderIds);
+    useEffect(() => {
+        backfillOrderIdsRef.current = backfillOrderIds;
+    }, [backfillOrderIds]);
 
     const nextItem = require('../../WarehouseScanner/assets/sounds/next_item.mp3');
     const buzzer = require('../../WarehouseScanner/assets/sounds/buzzer.mp3');
@@ -174,19 +182,19 @@ const Backfill = ({navigation}) => {
             // setLocations([backfillItems[0].location, backfillItems[0].binLocation])
             setOrderedLocs([backfillItems[0].location, backfillItems[0].binLocation])
             setItemName(backfillItems[0].description);
-            playSound(nextItem);
+            setScannedLoc("");
         } else {
             // playSound(scanContainerSound);
             itemRef.current?.focus();
-            setScannedLoc("");
+            playSound(nextItem);
+            // setScannedLoc("");
         }
     }, [atLocation])
 
     useEffect(() => {
         if (backfillItems.length > 0) {
             setOrderedItem(backfillItems[0].gamacode);
-        } else {
-            // router.push('./merge');
+        } else if (!backfillCompletedRef.current) {  // ← guard here too
             updateBackfill();
         }
     }, [backfillItems])
@@ -209,14 +217,14 @@ const Backfill = ({navigation}) => {
         if ((orderedItem !== scannedItem && scannedItem.length > 0) && atLocation) {
             playSound(wrongItem);
             setErrorMsg(`Wrong Item \n ${scannedItem}`);
-            setModalVisible(true);
+            if (!backfillCompletedRef.current) setModalVisible(true);
         }
     }, [orderedItem])
 
     useEffect(() => {
         setScannedItem("");
-        console.log("scannedQty useEffect")
-        if (backfillItems.length > 0 && scannedQty === backfillItems[0].orderedQty ) {
+        console.log("scannedQty useEffect");
+        if (backfillItems.length > 0 && scannedQty >= backfillItems[0].orderedQty) {
             setTimeout(() => {
                 toteRef.current?.focus();
                 playSound(scanContainerSound);
@@ -226,7 +234,7 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         console.log("tote useEffect")
-        if (backfillItems.length > 0 && tote === backfillItems[0].containerBarcode && scannedQty === backfillItems[0].orderedQty) {
+        if (backfillItems.length > 0 && tote === backfillItems[0].containerBarcode && scannedQty >= backfillItems[0].orderedQty) {
             console.log("quantity and tote satisfied");
             updateQty();
         }
@@ -235,7 +243,7 @@ const Backfill = ({navigation}) => {
             console.log("TOTE MISMATCH");
             // playSound(scanContainerFail);
             setErrorMsg(`Wrong Tote \n SCAN ${backfillItems[0].containerBarcode}`);
-            setModalVisible(true);
+            if (!backfillCompletedRef.current) setModalVisible(true);
             setTote("");
         }
     }, [tote])
@@ -323,9 +331,9 @@ const Backfill = ({navigation}) => {
 
             if (!response.data.success) {
                 setErrorMsg(response.data.reason);
-                setModalVisible(true);
+                if (!backfillCompletedRef.current) setModalVisible(true);  // ← guard here
                 setTimeout(() => {
-                    setModalVisible(false);
+                    setModalVisible(false);   // ← restore the original false
                     setOrderNum("");
                     setErrorMsg("");
                 }, 2000);
@@ -349,22 +357,27 @@ const Backfill = ({navigation}) => {
     }, [scannedQty, scannedLoc, backfillItems, user.employeeID, dispatch]);
 
     const updateBackfill = useCallback(async () => {
+        if (backfillCompletedRef.current) return; // ← guard against duplicate calls
+        backfillCompletedRef.current = true;
         try {
             const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillCompleted', {
                 token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
                 employeeId: user.employeeID,
-                orders: backfillOrderIds
+                orders: backfillOrderIdsRef.current
             })
 
             if (response.data.success) {
                 setBfModalVisible(true);
                 setErrorMsg("Backfill Completed");
                 playSound(backfillDoneSound);
+            } else {
+                backfillCompletedRef.current = false; // reset on failure so it can retry
             }
         } catch (err) {
             console.log("backfill update error: ", err.message);
+            backfillCompletedRef.current = false; // reset on error so it can retry
         }
-    }, [backfillOrderIds])
+    }, [])
 
     const handleEditIconPress = async () => {
         console.log("handleEditIconPress called");
@@ -503,6 +516,41 @@ const Backfill = ({navigation}) => {
             <Modal
             animationType="slide"
             transparent={true}
+            visible={notHaveVisible}>
+                <View style={styles.centeredView}>
+                    <View style={{...styles.modalView, width: 500}}>
+                        <Text style={styles.modalText}>Are you sure the item isn't available?</Text>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-around'}}>
+                            <TouchableOpacity 
+                                style={{...styles.rectButton, justifyContent: 'center'}}
+                                onPress={() => {
+                                    if (backfillItems.length > 0 && (scannedQty !== backfillItems[0].orderedQty)) {
+                                        // dispatch(updateOGOrder(scannedQty));
+                                        updateQty();
+                                    }
+                                    // setOrder(prevOrder => prevOrder.slice(1));
+                                    setNotHaveVisible(false);
+                                }}
+                                >
+                                <Text
+                                    style={{textAlign: 'center'}}
+                                >Yes</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity 
+                                style={{...styles.rectButton, justifyContent: 'center', marginStart: 40}}
+                                onPress={() => {
+                                    dispatch(removeBackfillItem());
+                                    setNotHaveVisible(false);
+                                }}>
+                                <Text style={{textAlign: 'center'}}>No</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+            animationType="slide"
+            transparent={true}
             visible={modalVisible || bfModalVisible}
             onRequestClose={() => {
                 setErrorMsg("");
@@ -555,7 +603,7 @@ const Backfill = ({navigation}) => {
                                 } else {
                                     setErrorMsg(`Incorrect Order`);
                                     playSound(buzzer);
-                                    setModalVisible(true);
+                                    if (!backfillCompletedRef.current) setModalVisible(true);
                                     setVerifyOrderVal("");
                                     // setTimeout(() => {
                                     //     setModalVisible(false);
@@ -726,7 +774,7 @@ const Backfill = ({navigation}) => {
                                         setErrorMsg(`Incorrect Location \n ${newVal}`);
                                         playSound(wrongLocation);
                                         // setScannedLoc("");
-                                        setModalVisible(true);
+                                        if (!backfillCompletedRef.current) setModalVisible(true);
                                     } else if (showKeyboard === false && orderedLocs.includes(newVal)) {
                                         // Correct location scanned
                                         console.log("Setting scannedLoc (correct scan):", newVal);
@@ -752,7 +800,7 @@ const Backfill = ({navigation}) => {
                                         
                                         setErrorMsg(`Incorrect Location \n ${scannedLoc}`);
                                         playSound(wrongLocation);
-                                        setModalVisible(true);
+                                        if (!backfillCompletedRef.current) setModalVisible(true);
                                     }
                                 }}
                                 autoFocus={true}
@@ -1034,14 +1082,14 @@ const Backfill = ({navigation}) => {
                                             }, 500)
                                         }
 
-                                        if (newVal === backfillItems[0].gamacode || newVal === backfillItems[0].itemLookupCode || aliasFound) {
-                                            console.log("scan match found");
-                                            // updateContainer(1);
-                                            setScannedQty(prevQty => prevQty + 1);
-
-                                        } else if (backfillItems && multiplierFound && backfillItems[0].upcList[multiplierIndex].sellingUnitMultiplier + scannedQty <= orderedQty) {
+                                       if (newVal === backfillItems[0].gamacode || newVal === backfillItems[0].itemLookupCode || aliasFound) {
+                                            setScannedQty(prevQty => Math.min(prevQty + 1, backfillItems[0].orderedQty));
+                                        } else if (backfillItems && multiplierFound) {
                                             // updateContainer(order[0].upcList[multiplierIndex].sellingUnitMultiplier);
-                                            setScannedQty(prevQty => prevQty + backfillItems[0].upcList[multiplierIndex].sellingUnitMultiplier);
+                                            setScannedQty(prevQty => Math.min(
+                                                prevQty + backfillItems[0].upcList[multiplierIndex].sellingUnitMultiplier,
+                                                backfillItems[0].orderedQty
+                                            ));
                                         } else {
                                             // Log the bad item scan
                                             // BadScanLogger.logBadScan({
@@ -1055,7 +1103,7 @@ const Backfill = ({navigation}) => {
                                             setErrorMsg(`Wrong Item \n ${newVal}`);
                                             setScannedItem("");
                                             playSound(wrongItem);
-                                            setModalVisible(true);
+                                            if (!backfillCompletedRef.current) setModalVisible(true);
                                             // setTimeout(() => {
                                             //     setModalVisible(false);
                                             //     setErrorMsg("");

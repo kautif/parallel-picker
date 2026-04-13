@@ -423,6 +423,12 @@ async function getMergedBackfills () {
                         } else {
                             setContainer(newVal);
                         }
+
+                        if (newVal.length > 1 && newVal.length < 6) {
+                            setModalVisible(true);
+                            setContainer("");
+                            setErrorMsg("Container must be at least 6 characters");
+                        }
                     }}
                     value={container}
                 ></TextInput>
