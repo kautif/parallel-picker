@@ -3,7 +3,7 @@ import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Image, Modal, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../app/redux/parallelSlice';
@@ -33,6 +33,8 @@ const Prepare = ({navigation}) => {
     const initialBackfill = useSelector(state => state.parallel.initialBackfill);
     const picksStarted = useSelector(state => state.parallel.picksStarted); 
     const mergedBackfills = useSelector(state => state.parallel.mergedBackfills);
+
+    const { AudioRouter } = NativeModules;
 
     const buzzer = require('../../WarehouseScanner/assets/sounds/buzzer.mp3');
     const logoutDoor = require('../../WarehouseScanner/assets/images/logout_door.png');

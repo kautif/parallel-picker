@@ -7,11 +7,13 @@ import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, T
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
-import { addArrangedBackfillItem, addArrangedBackfillObj, addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
+import { addArrangedBackfillObj, addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 
 const Backfill = ({navigation}) => {
     const [atLocation, setAtLocation] = useState(false);
+    const [lastLocation, setLastLocation] = useState("");
+
     const [locations, setLocations] = useState([]);
     const [orderedLocs, setOrderedLocs] = useState([]);
     const [scannedLoc, setScannedLoc] = useState("");
@@ -36,6 +38,15 @@ const Backfill = ({navigation}) => {
     const [orderedQty, setOrderedQty] = useState(0);
     const [scannedQty, setScannedQty] = useState(0);
     const [scannedBefore, setScannedBefore] = useState(false);
+
+    // Tracks which location was already scanned so we can enforce the alternate on the next pass
+    const [firstScannedLoc, setFirstScannedLoc] = useState("");
+    // When true, the item has been through a Not Have at one location and must be scanned at the other
+    const [alternateLocRequired, setAlternateLocRequired] = useState(false);
+    // When true (single-location edge case), skip straight to tote scan and remove item on success
+    const [awaitingToteOnlyRemoval, setAwaitingToteOnlyRemoval] = useState(false);
+    // When true, user must scan the tote/containerBarcode after Not Have before continuing
+    const [requireToteAfterNotHave, setRequireToteAfterNotHave] = useState(false);
 
     // const [container, setContainers] = useState();
     const [lastQty, setLastQty] = useState(0);
@@ -71,6 +82,15 @@ const Backfill = ({navigation}) => {
     const scannedLocValueRef = useRef('');
     const isUpdatingQty = useRef(false);
     const backfillCompletedRef = useRef(false);
+    // Persists the last successfully verified location across state resets so the
+    // backfillItems effect can check it before the atLocation effect clears scannedLoc.
+    const lastVerifiedLocRef = useRef('');
+    // Accumulates { pickLocation, qty } entries as the user works through locations.
+    // Only sent to the API once the item is fully done (tote scanned or both locations exhausted).
+    const pickedLocationsRef = useRef([]);
+    // Set to true synchronously in updateQty when the next item shares the current location,
+    // so the atLocation effect can skip the reset before backfillItems has updated.
+    const skipLocationScanRef = useRef(false);
 
     const { AudioRouter } = NativeModules;
 
@@ -84,6 +104,7 @@ const Backfill = ({navigation}) => {
     const scanContainerSound = require('../../WarehouseScanner/assets/sounds/scan_container.mp3');
     const wrongLocation = require('../../WarehouseScanner/assets/sounds/wrong_location.mp3');
     const wrongItem = require('../../WarehouseScanner/assets/sounds/wrong_item.mp3');
+    const pickItem = require('../../WarehouseScanner/assets/sounds/pick_item.mp3');
     const scanContainerFail = require('../../WarehouseScanner/assets/sounds/wrong_container.mp3');
     const backfillDoneSound = require('../../WarehouseScanner/assets/sounds/backfill_completed.mp3');
     const loadingAnim = require('../../WarehouseScanner/assets/images/loading.webp');
@@ -92,6 +113,25 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         // playSound(nextItem);
+        const setupAudio = async () => {
+            try {
+                await Audio.setAudioModeAsync({
+                    allowsRecordingIOS: false,
+                    staysActiveInBackground: false,
+                    playsInSilentModeIOS: true,
+                    shouldDuckAndroid: true,
+                    playThroughEarpieceAndroid: false,
+                });
+                
+                if (Platform.OS === 'android' && AudioRouter) {
+                    await AudioRouter.forceSpeakerOutput();
+                }
+            } catch (e) {
+                console.log("Audio setup error:", e);
+            }
+        };
+        setupAudio();
+
         const existingIds = new Set(backfillsArranged.map(obj => obj.orderId));
         const newObjs = orders
         .filter(id => !existingIds.has(id))
@@ -176,28 +216,42 @@ const Backfill = ({navigation}) => {
         }
     }, [requiredOrders])
 
-    useEffect(() => {
-        console.log("atLocation", backfillItems);
-        if (atLocation === false && backfillItems.length > 0) {
-            // setLocations([backfillItems[0].location, backfillItems[0].binLocation])
-            setOrderedLocs([backfillItems[0].location, backfillItems[0].binLocation])
-            setItemName(backfillItems[0].description);
-            setScannedLoc("");
-        } else {
-            // playSound(scanContainerSound);
-            itemRef.current?.focus();
-            playSound(nextItem);
-            // setScannedLoc("");
+ useEffect(() => {
+    if (atLocation === false && backfillItems.length > 0) {
+        // PREVENT RESET: If we are skipping, don't clear the text field or play "next location" sound
+        if (skipLocationScanRef.current) {
+            return; 
         }
-    }, [atLocation])
+
+        const nextBackfillItem = backfillItems[0];
+        setOrderedLocs([nextBackfillItem.location, nextBackfillItem.binLocation]);
+        setItemName(nextBackfillItem.description);
+        setScannedLoc(""); 
+        playSound(nextItem);
+    } else if (atLocation === true) {
+        itemRef.current?.focus();
+        playSound(pickItem);
+    }
+}, [atLocation]);
 
     useEffect(() => {
         if (backfillItems.length > 0) {
-            setOrderedItem(backfillItems[0].gamacode);
-        } else if (!backfillCompletedRef.current) {  // ← guard here too
+            const nextItem = backfillItems[0];
+            
+            // ALWAYS update these so the user sees the new SKU to pick
+            setOrderedItem(nextItem.gamacode);
+            setItemName(nextItem.description);
+            setOrderedLocs([nextItem.location, nextItem.binLocation]);
+
+            if (skipLocationScanRef.current) {
+                console.log("Skipping scan, staying at:", lastVerifiedLocRef.current);
+                setAtLocation(true); 
+                skipLocationScanRef.current = false; // Reset the flag
+            }
+        } else if (backfillItems.length === 0 && backfillCompletedRef.current === false) {
             updateBackfill();
         }
-    }, [backfillItems])
+    }, [backfillItems]);
 
     useEffect(() => {
         if (backfillCompleted === true) {
@@ -230,59 +284,59 @@ const Backfill = ({navigation}) => {
                 playSound(scanContainerSound);
             }, 500)
         }
-    }, [scannedQty])
+    }, [scannedQty, alternateLocRequired])
 
     useEffect(() => {
-        console.log("tote useEffect")
+        console.log("tote useEffect");
         if (backfillItems.length > 0 && tote === backfillItems[0].containerBarcode && scannedQty >= backfillItems[0].orderedQty) {
             console.log("quantity and tote satisfied");
+            // Append the current location's entry then fire the single API call.
+            pickedLocationsRef.current = [
+                ...pickedLocationsRef.current,
+                { pickLocation: scannedLoc, qty: scannedQty - (pickedLocationsRef.current[0]?.qty ?? 0) }
+            ];
             updateQty();
-        }
-
-        if (backfillItems.length > 0 && tote.length > 0 && tote != backfillItems[0].containerBarcode) {
+        } else if (awaitingToteOnlyRemoval && backfillItems.length > 0 && tote === backfillItems[0].containerBarcode) {
+            // Single-location edge case: qty was Not Have'd at the only location.
+            // pickedLocationsRef already has that entry from storeFirstLocationAndAdvance.
+            // Just call updateQty — it will send the single entry and remove the item.
+            console.log("tote-only removal triggered");
+            updateQty();
+        } else if (backfillItems.length > 0 && tote.length > 0 && tote != backfillItems[0].containerBarcode) {
             console.log("TOTE MISMATCH");
-            // playSound(scanContainerFail);
             setErrorMsg(`Wrong Tote \n SCAN ${backfillItems[0].containerBarcode}`);
             if (!backfillCompletedRef.current) setModalVisible(true);
             setTote("");
         }
-    }, [tote])
+    }, [tote, awaitingToteOnlyRemoval])
 
-    async function playSound (audioFile) {
+    // 1. At the top of your component, change the state to a Ref
+    const soundRef = useRef(null); 
+
+    // 2. Update the function
+    async function playSound(audioFile) {
         try {
-            // Method 1: Expo Audio reconfiguration
-            await Audio.setAudioModeAsync({
-                allowsRecordingIOS: false,
-                staysActiveInBackground: false,
-                playsInSilentModeIOS: true,
-                shouldDuckAndroid: true,
-                playThroughEarpieceAndroid: false,
+            // Unload previous sound using the REF
+            if (soundRef.current) {
+                await soundRef.current.unloadAsync();
+            }
+
+            const { sound: newSound } = await Audio.Sound.createAsync(
+                audioFile,
+                { shouldPlay: true, volume: 1.0 }
+            );
+
+            soundRef.current = newSound; // Store in ref immediately
+
+            newSound.setOnPlaybackStatusUpdate((status) => {
+                if (status.didJustFinish) {
+                    newSound.unloadAsync();
+                    soundRef.current = null;
+                }
             });
 
-            // Method 2: Native module (if available)
-            if (Platform.OS === 'android' && AudioRouter) {
-                try {
-                    await AudioRouter.forceSpeakerOutput();
-                } catch (nativeError) {
-                    console.log('Native audio routing failed in playSound:', nativeError.message);
-                }
-            }
-            
-            const { sound } = await Audio.Sound.createAsync(audioFile);
-            setSound(sound);
-            
-            // Set volume to max to ensure it's audible
-            await sound.setVolumeAsync(1.0);
-            await sound.playAsync();
         } catch (error) {
             console.error('Error playing sound:', error);
-            // Last resort: try playing without any configuration
-            try {
-                const { sound } = await Audio.Sound.createAsync(audioFile);
-                await sound.playAsync();
-            } catch (fallbackError) {
-                console.error('Fallback sound play failed:', fallbackError);
-            }
         }
     }
 
@@ -314,47 +368,110 @@ const Backfill = ({navigation}) => {
     };
 
     const updateQty = useCallback(async () => {
+        if (isUpdatingQty.current) return;
+        isUpdatingQty.current = true;
         console.log("UPDATING backfill quantity");
         console.log("employee id: ", user.employeeID);
         console.log("order id: ", backfillItems[0].orderId);
         console.log("item id: ", backfillItems[0].orderBackFillItemsId);
-        console.log("location: ", scannedLoc);
-        console.log("UPDATEQTY: ", scannedQty);
+        console.log("pickLocations: ", pickedLocationsRef.current);
         try {
+            setLastLocation(pickedLocationsRef.current);
             const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillDetails', {
                 token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
                 employeeId: user.employeeID,
                 orderBackFillItemsId: backfillItems[0].orderBackFillItemsId,
-                pickLocation: scannedLoc,
-                scannedQty: scannedQty,
+                pickLocations: pickedLocationsRef.current,
             });
 
             if (!response.data.success) {
                 setErrorMsg(response.data.reason);
-                if (!backfillCompletedRef.current) setModalVisible(true);  // ← guard here
+                if (!backfillCompletedRef.current) setModalVisible(trFue);
+                isUpdatingQty.current = false;
                 setTimeout(() => {
-                    setModalVisible(false);   // ← restore the original false
+                    setModalVisible(false);
                     setOrderNum("");
                     setErrorMsg("");
                 }, 2000);
             } else {
-                for (let i = 0; i < backfillsArranged.length; i++) {
-                    console.log("backfills arranged id: ", backfillsArranged[i].orderId);
-                    console.log("backfills [0] id: ", backfillItems[0].orderId);
-                    if (parseInt(backfillsArranged[i].orderId) == parseInt(backfillItems[0].orderId)) {
-                        console.log("backfill Ids match");
-                        dispatch(addArrangedBackfillItem(backfillItems[0]));
+                const nextBackfillItem = backfillItems[1]; 
+                let isSkipping = false; // Local flag to control immediate state
+
+                if (nextBackfillItem) {
+                    const prevLoc = lastVerifiedLocRef.current;
+                    const isSameLocation = prevLoc === nextBackfillItem.location || prevLoc === nextBackfillItem.binLocation;
+                    
+                    if (isSameLocation) {
+                        skipLocationScanRef.current = true;
+                        isSkipping = true;
+                        setScannedLoc(prevLoc); 
+                        // DO NOT setAtLocation(false) here, because we want to stay "at location"
                     }
                 }
+
+                pickedLocationsRef.current = [];
                 dispatch(removeBackfillItem());
-                setAtLocation(false);
+
+                // ONLY reset these if we aren't staying at the same location
+                if (!isSkipping) {
+                    setAtLocation(false);
+                    setScannedLoc("");
+                }
+                
+                // Always reset these item-specific fields
                 setScannedQty(0);
                 setTote("");
+                setFirstScannedLoc("");
+                setAlternateLocRequired(false);
+                setAwaitingToteOnlyRemoval(false);
+                setRequireToteAfterNotHave(false);
+                isUpdatingQty.current = false;
             }
         } catch (err) {
             console.error("Error updating order:", err);
+            isUpdatingQty.current = false;
         }
-    }, [scannedQty, scannedLoc, backfillItems, user.employeeID, dispatch]);
+    }, [backfillItems, user.employeeID, dispatch]);
+
+    // Called when Not Have is confirmed at the first location.
+    // Requires containerBarcode scan before the user can proceed to alternate location.
+    const storeFirstLocationAndAdvance = useCallback(({ qty, loc, isSingleLocation }) => {
+        console.log("storeFirstLocationAndAdvance — loc:", loc, "qty:", qty, "singleLoc:", isSingleLocation);
+
+        // Always record what was (or wasn't) scanned at this location.
+        pickedLocationsRef.current = [{ pickLocation: loc, qty }];
+
+        if (isSingleLocation) {
+            // Single-location: nothing left to try — go straight to tote scan.
+            // updateQty will be called once the tote is scanned.
+            setScannedQty(0);
+            setTote("");
+            setScannedLoc("");
+            setAtLocation(false);
+            setAwaitingToteOnlyRemoval(true);
+        } else {
+            // Two-location: require container barcode scan BEFORE going to alternate,
+            // UNLESS no quantity was scanned at this location (nothing went into the tote).
+            setFirstScannedLoc(loc);
+            setAlternateLocRequired(true);
+            setScannedQty(qty);  // carry forward so display shows aggregate total
+            setTote("");
+
+            if (qty === 0) {
+                // Nothing was scanned here — no container scan needed. Go straight to alternate location.
+                setRequireToteAfterNotHave(false);
+                setScannedLoc("");
+                setAtLocation(false);
+            } else {
+                // Stay on the at-location screen so the tote input handles the container scan.
+                setRequireToteAfterNotHave(true);
+                setTimeout(() => {
+                    toteRef.current?.focus();
+                    playSound(scanContainerSound);
+                }, 500);
+            }
+        }
+    }, []);
 
     const updateBackfill = useCallback(async () => {
         if (backfillCompletedRef.current) return; // ← guard against duplicate calls
@@ -370,6 +487,7 @@ const Backfill = ({navigation}) => {
                 setBfModalVisible(true);
                 setErrorMsg("Backfill Completed");
                 playSound(backfillDoneSound);
+                lastVerifiedLocRef.current = '';
             } else {
                 backfillCompletedRef.current = false; // reset on failure so it can retry
             }
@@ -525,10 +643,47 @@ const Backfill = ({navigation}) => {
                                 style={{...styles.rectButton, justifyContent: 'center'}}
                                 onPress={() => {
                                     if (backfillItems.length > 0 && (scannedQty !== backfillItems[0].orderedQty)) {
-                                        // dispatch(updateOGOrder(scannedQty));
-                                        updateQty();
+                                        const item = backfillItems[0];
+                                        const hasBothLocations = item.location && item.location.length > 0
+                                            && item.binLocation && item.binLocation.length > 0;
+
+                                        if (hasBothLocations && !alternateLocRequired) {
+                                            // First Not Have on a two-location item — store this location's
+                                            // entry locally and send the user to the alternate location.
+                                            // No API call yet.
+                                            storeFirstLocationAndAdvance({
+                                                qty: scannedQty,
+                                                loc: scannedLoc,
+                                                isSingleLocation: false
+                                            });
+                                        } else {
+                                            // Second Not Have (alternate location exhausted) OR
+                                            // single-location item — require container barcode scan before updateQty,
+                                            // UNLESS nothing was scanned at this location (nothing went into the tote).
+                                            const prevQty = pickedLocationsRef.current[0]?.qty ?? 0;
+                                            const addedAtThisLoc = scannedQty - prevQty;
+
+                                            pickedLocationsRef.current = [
+                                                ...pickedLocationsRef.current,
+                                                { pickLocation: scannedLoc, qty: addedAtThisLoc }
+                                            ];
+
+                                            if (addedAtThisLoc === 0) {
+                                                // Nothing was scanned at this location — skip container scan and finalize directly.
+                                                console.log("Not Have at alternate with 0 qty — skipping container scan, calling updateQty");
+                                                updateQty();
+                                            } else {
+                                                // Set flag to require tote/containerBarcode scan before finalizing.
+                                                // Stay on the at-location screen so the tote input handles the scan.
+                                                setRequireToteAfterNotHave(true);
+                                                setTote("");
+                                                setTimeout(() => {
+                                                    toteRef.current?.focus();
+                                                    playSound(scanContainerSound);
+                                                }, 500);
+                                            }
+                                        }
                                     }
-                                    // setOrder(prevOrder => prevOrder.slice(1));
                                     setNotHaveVisible(false);
                                 }}
                                 >
@@ -559,7 +714,6 @@ const Backfill = ({navigation}) => {
                 setModalVisible(false);
                 setBfModalVisible(false);
                 if (backfillItems.length === 0) {
-                    router.push('./merge');
                     setBackfillCompleted(true);
                 }
             }}
@@ -573,7 +727,7 @@ const Backfill = ({navigation}) => {
                             setBfModalVisible(false);
                             setErrorMsg("");
                             if (backfillItems.length === 0) {
-                                router.push('./merge');
+                                setBackfillCompleted(true);
                             }
                         }}>
                             <Text style={{color: 'white', fontSize: 20}}>Close</Text>
@@ -718,97 +872,163 @@ const Backfill = ({navigation}) => {
                                         fontSize: 20,
                                         textAlign: 'center'
                                     }}>Ordered QTY: {backfillItems && backfillItems[0].orderedQty}</Text>
+                                    {alternateLocRequired && (
+                                        <Text style={{
+                                            width: 150,
+                                            fontSize: 14,
+                                            textAlign: 'center',
+                                            color: '#d61a1a',
+                                            fontWeight: 'bold',
+                                            marginTop: 4
+                                        }}>{requireToteAfterNotHave ? 'Scan container barcode' : 'Scan alternate location'}</Text>
+                                    )}
+                                    {awaitingToteOnlyRemoval && (
+                                        <Text style={{
+                                            width: 180,
+                                            fontSize: 14,
+                                            textAlign: 'center',
+                                            color: '#d61a1a',
+                                            fontWeight: 'bold',
+                                            marginTop: 4
+                                        }}>Scan tote to continue</Text>
+                                    )}
                                 </TouchableOpacity>
                             </View>
                         </View>
-                        <Text style={{...styles.heading, marginTop: 10, fontWeight: 'bold'}}>Scan Location</Text>
+                        <Text style={{...styles.heading, marginTop: 10, fontWeight: 'bold'}}>
+                            {awaitingToteOnlyRemoval ? 'Scan Tote' : (requireToteAfterNotHave ? 'Scan Container' : 'Scan Location')}
+                        </Text>
                         <View style={{flexDirection: 'row', width: 300, marginHorizontal: 'auto'}}>
-                            <TextInput
+                            {awaitingToteOnlyRemoval || requireToteAfterNotHave ? (
+                                // Require containerBarcode scan (after first Not Have) or tote scan (single-location)
+                                <TextInput
+                                    style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1}}
+                                    autoFocus={true}
+                                    showSoftInputOnFocus={false}
+                                    onChangeText={(newVal) => {
+                                        console.log("Container/Tote input - newVal:", newVal, "requireToteAfterNotHave:", requireToteAfterNotHave);
+                                        
+                                        if (requireToteAfterNotHave) {
+                                            // Validate containerBarcode after Not Have (safety net — primary path is at-location tote input)
+                                            if (newVal === backfillItems[0].containerBarcode) {
+                                                playSound(scanContainerSound);
+                                                setTote("");
+
+                                                if (pickedLocationsRef.current.length >= 2) {
+                                                    // Second Not Have — both locations exhausted, finalize
+                                                    console.log("Second Not Have container scan (non-atLocation) — calling updateQty");
+                                                    updateQty();
+                                                } else {
+                                                    // First Not Have — clear flag, advance to alternate location
+                                                    console.log("First Not Have container scan (non-atLocation) — advancing to alternate location");
+                                                    setRequireToteAfterNotHave(false);
+                                                    setScannedLoc("");
+                                                }
+                                            } else if (newVal.length >= 4) {
+                                                console.log("INCORRECT CONTAINER BARCODE");
+                                                playSound(scanContainerFail);
+                                                setErrorMsg(`Wrong Container \nExpected: ${backfillItems[0].containerBarcode}\nScanned: ${newVal}`);
+                                                setModalVisible(true);
+                                                setTote("");
+                                            } else {
+                                                setTote(newVal);
+                                            }
+                                        } else if (awaitingToteOnlyRemoval) {
+                                            // For single-location items, validate location scan (old behavior)
+                                            const acceptableLocs = [backfillItems[0].location, backfillItems[0].binLocation];
+                                            
+                                            if (showKeyboard === false && acceptableLocs.includes(newVal)) {
+                                                lastVerifiedLocRef.current = newVal;
+                                                setScannedLoc(newVal);
+                                                setSno(backfillItems[0].sNo);
+                                                setAtLocation(true);
+                                            } else if (showKeyboard === false && newVal.length >= 4 && !acceptableLocs.includes(newVal)) {
+                                                playSound(wrongLocation);
+                                                setErrorMsg(`Incorrect Location: ${newVal}`);
+                                                setModalVisible(true);
+                                                setScannedLoc("");
+                                            } else {
+                                                setScannedLoc(newVal);
+                                            }
+                                        }
+                                    }}
+                                    autoCapitalize='characters'
+                                    value={tote}
+                                />
+                            ) : (
+                                <TextInput
                                 style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1}}
                                 ref={scanLocRef}
                                 onChangeText={async (newVal) => {
                                     console.log("onChangeText called - newVal:", newVal, "showKeyboard:", showKeyboard);
-                                    
+
+                                    // Determine which location(s) are acceptable this pass.
+                                    // If alternateLocRequired, only the location the user has NOT yet scanned is valid.
+                                    const acceptableLocs = alternateLocRequired
+                                        ? orderedLocs.filter(l => l && l.length > 0 && l !== firstScannedLoc)
+                                        : orderedLocs.filter(l => l && l.length > 0);
+
+                                    const longestAcceptable = acceptableLocs.reduce(
+                                        (max, l) => Math.max(max, l.length), 0
+                                    );
+
                                     // Store value in ref for keyboard validation
                                     if (showKeyboard === true) {
                                         scannedLocValueRef.current = newVal;
                                         setScannedLoc(newVal);
                                         // Validate keyboard input when it reaches expected length
-
-                                        if (orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
-                                            // Keyboard is enabled - just update the text field
+                                        if (acceptableLocs.includes(newVal) && newVal.length >= longestAcceptable) {
                                             console.log("Setting scannedLoc (keyboard enabled):", newVal);
+                                            lastVerifiedLocRef.current = newVal;
                                             setSno(backfillItems[0].sNo);
                                             setAtLocation(true);
-                                            // playSound(nextItem);
                                         }
                                     }
-                                    
-                                    if (showKeyboard === false && !orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
-                                        // Log the bad location scan (wrong location, same length)
-                                        // await BadScanLogger.logBadScan({
-                                        //     employeeId: user.employeeID || 'N/A',
-                                        //     employeeName: user.employeeName || username || 'Unknown',
-                                        //     scanType: 'Location',
-                                        //     expected: orderedLocs,
-                                        //     scanned: newVal
-                                        // });
-                                        
-                                        setErrorMsg(`Incorrect Location \n ${newVal}`);
+
+                                    if (showKeyboard === false && !acceptableLocs.includes(newVal) 
+                                        // && newVal.length >= longestAcceptable
+                                    ) {
+                                        // Scanned something that isn't acceptable for this pass
+                                        const errDetail = alternateLocRequired
+                                            ? `Must scan alternate location`
+                                            : `Incorrect Location \n ${newVal}`;
+                                        setErrorMsg(errDetail);
                                         playSound(wrongLocation);
-                                        // setScannedLoc("");
                                         setModalVisible(true);
-                                        // setTimeout(() => {
-                                        //     setModalVisible(false);
-                                        // }, 2000)
-                                    } else if (showKeyboard === false && !orderedLocs.includes(newVal) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
-                                        // Log bad scan for wrong length (e.g., badge instead of location)
-                                        // await BadScanLogger.logBadScan({
-                                        //     employeeId: user.employeeID || 'N/A',
-                                        //     employeeName: user.employeeName || username || 'Unknown',
-                                        //     scanType: 'Location',
-                                        //     expected: orderedLocs,
-                                        //     scanned: newVal
-                                        // });
-                                        
-                                        setErrorMsg(`Incorrect Location \n ${newVal}`);
-                                        playSound(wrongLocation);
-                                        // setScannedLoc("");
-                                        if (!backfillCompletedRef.current) setModalVisible(true);
-                                    } else if (showKeyboard === false && orderedLocs.includes(newVal)) {
+                                    } else if (showKeyboard === false && acceptableLocs.includes(newVal)) {
                                         // Correct location scanned
                                         console.log("Setting scannedLoc (correct scan):", newVal);
+                                        lastVerifiedLocRef.current = newVal;
                                         setScannedLoc(newVal);
                                         setSno(backfillItems[0].sNo);
                                         setAtLocation(true);
-                                        // playSound(nextItem);
-                                        // setTotalLocationsScanned(prevItems => prevItems + 1);
                                     }
                                 }}
-                                onBlur={async () => {
-                                    console.log("onBlur called - scannedLoc:", scannedLoc, "orderedLocs:", orderedLocs);
-                                    // Validate when field loses focus (keyboard entry complete)
-                                    if (showKeyboard && !orderedLocs.at(scannedLoc) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
-                                        console.log("LOGGING BAD SCAN - keyboard onBlur");
-                                        // await BadScanLogger.logBadScan({
-                                        //     employeeId: user.employeeID || 'N/A',
-                                        //     employeeName: user.employeeName || username || 'Unknown',
-                                        //     scanType: 'Location',
-                                        //     expected: orderedLocs,
-                                        //     scanned: scannedLoc
-                                        // });
+                                // onBlur={async () => {
+                                //     console.log("onBlur called - scannedLoc:", scannedLoc, "orderedLocs:", orderedLocs);
+                                //     // Validate when field loses focus (keyboard entry complete)
+                                //     if (showKeyboard && !orderedLocs.at(scannedLoc) && (newVal.length >= orderedLocs[0].length || newVal.length >= orderedLocs[1].length)) {
+                                //         console.log("LOGGING BAD SCAN - keyboard onBlur");
+                                //         // await BadScanLogger.logBadScan({
+                                //         //     employeeId: user.employeeID || 'N/A',
+                                //         //     employeeName: user.employeeName || username || 'Unknown',
+                                //         //     scanType: 'Location',
+                                //         //     expected: orderedLocs,
+                                //         //     scanned: scannedLoc
+                                //         // });
                                         
-                                        setErrorMsg(`Incorrect Location \n ${scannedLoc}`);
-                                        playSound(wrongLocation);
-                                        if (!backfillCompletedRef.current) setModalVisible(true);
-                                    }
-                                }}
+                                //         setErrorMsg(`Incorrect Location \n ${scannedLoc}`);
+                                //         playSound(wrongLocation);
+                                //         if (!backfillCompletedRef.current) setModalVisible(true);
+                                //     }
+                                // }}
                                 autoFocus={true}
                                 autoCapitalize='characters'
                                 showSoftInputOnFocus={showKeyboard}
                                 value={scannedLoc}
                             />
-                            <TouchableOpacity onPress={() => {
+                            )}{/* closes container/tote input ternary */}
+                            {!awaitingToteOnlyRemoval && !requireToteAfterNotHave && <TouchableOpacity onPress={() => {
                                 handleEditIconPress();
                             }}>
                                 <Image 
@@ -817,7 +1037,7 @@ const Backfill = ({navigation}) => {
                                     }}
                                     source={editIcon}
                                 />
-                            </TouchableOpacity>
+                            </TouchableOpacity>}
                         </View>
                     </SafeAreaView>
                  }
@@ -916,9 +1136,45 @@ const Backfill = ({navigation}) => {
                                     editable={scannedQty !== orderedQty ? true : false}
                                     showSoftInputOnFocus={false}
                                     onChangeText={async (newVal) => {
-                                        console.log("Tote onChangeText - newVal:", newVal);
+                                        console.log("Tote onChangeText - newVal:", newVal, "requireToteAfterNotHave:", requireToteAfterNotHave);
                                         console.log("EMPLOYEE:", user.badgeId);
-                                        if (locations.includes(newVal) || upcs.includes(newVal) || skus.includes(newVal) || aliasLists.includes(newVal) || itemMultipliers.includes(newVal) || newVal.startsWith("TA")) {
+                                        
+                                        // If requireToteAfterNotHave is true, validate the containerBarcode
+                                        if (requireToteAfterNotHave) {
+                                            if (newVal === backfillItems[0].containerBarcode) {
+                                                // CORRECT: Handle first vs second Not Have
+                                                console.log("CORRECT CONTAINER BARCODE");
+                                                setTote("");
+                                                
+                                                // Check if this is first or second Not Have by checking pickedLocationsRef length
+                                                if (pickedLocationsRef.current.length === 2) {
+                                                    // SECOND Not Have - both locations stored, finalize with updateQty
+                                                    // Don't play scanContainerSound — updateQty sets atLocation(false)
+                                                    // which triggers the atLocation useEffect playing nextItem.
+                                                    console.log("Second Not Have - calling updateQty");
+                                                    updateQty();
+                                                } else {
+                                                    // FIRST Not Have - container scanned, now advance to alternate location
+                                                    // Don't play scanContainerSound here — setAtLocation(false) triggers
+                                                    // the atLocation useEffect which plays nextItem for the new location.
+                                                    console.log("First Not Have - container scanned, advancing to alternate location");
+                                                    setRequireToteAfterNotHave(false);
+                                                    setTote("");
+                                                    setScannedLoc("");
+                                                    setAtLocation(false);
+                                                }
+                                            } else if (newVal.length >= 4) {
+                                                // INCORRECT: Show error
+                                                console.log("INCORRECT CONTAINER BARCODE");
+                                                playSound(scanContainerFail);
+                                                setErrorMsg(`Wrong Container \nExpected: ${backfillItems[0].containerBarcode}\nScanned: ${newVal}`);
+                                                setModalVisible(true);
+                                                setTote("");
+                                            } else {
+                                                // Still typing
+                                                setTote(newVal);
+                                            }
+                                        } else if (locations.includes(newVal) || upcs.includes(newVal) || skus.includes(newVal) || aliasLists.includes(newVal) || itemMultipliers.includes(newVal) || newVal.startsWith("TA")) {
                                             console.log("BAD TOTE DETECTED in onChangeText");
                                             // Log the bad tote scan (scanned location/item instead of tote)
                                             // await BadScanLogger.logBadScan({
@@ -939,6 +1195,7 @@ const Backfill = ({navigation}) => {
                                         } else {
                                             console.log("VALID TOTE in onChangeText - focusing item field");
                                             setTote(newVal);
+                                            
                                             // let containerObj = {
                                             //     containerBarcode: newVal,
                                             //     qty: lastQty
@@ -951,7 +1208,7 @@ const Backfill = ({navigation}) => {
                                             },   500)
                                         }
 
-                                        if (newVal !== backfillItems[0].containerBarcode) {
+                                        if (!requireToteAfterNotHave && newVal !== backfillItems[0].containerBarcode && newVal.length > 0) {
                                             playSound(scanContainerFail);
                                         }
                                     }}
@@ -974,11 +1231,15 @@ const Backfill = ({navigation}) => {
                                         //     toteRef.current?.focus();
                                         // }, 500)
                                     }}>
-                                    <Text
+                                    {/* <Text
                                         style={{...styles.rectButton, backgroundColor: "rgb(0, 85, 165)", color: 'white', marginTop: 10, fontSize: 20, fontWeight: 'bold', height: 55, borderColor: 'black', borderWidth: 1}}>
                                             Next Container
-                                    </Text>
+                                    </Text> */}
                                 </TouchableOpacity>
+                                <Text
+                                    style={{fontSize: 25, fontWeight: 'bold', textAlign: 'center'}}>
+                                        {backfillItems[0].containerBarcode}
+                                </Text>
                             </View>
                         </View>
                     </View>
@@ -1085,7 +1346,6 @@ const Backfill = ({navigation}) => {
                                        if (newVal === backfillItems[0].gamacode || newVal === backfillItems[0].itemLookupCode || aliasFound) {
                                             setScannedQty(prevQty => Math.min(prevQty + 1, backfillItems[0].orderedQty));
                                         } else if (backfillItems && multiplierFound) {
-                                            // updateContainer(order[0].upcList[multiplierIndex].sellingUnitMultiplier);
                                             setScannedQty(prevQty => Math.min(
                                                 prevQty + backfillItems[0].upcList[multiplierIndex].sellingUnitMultiplier,
                                                 backfillItems[0].orderedQty

@@ -58,6 +58,7 @@ const Merge = () => {
     const toastOpacity = useRef(new Animated.Value(0)).current;
 
     const wrongItem = require('../../WarehouseScanner/assets/sounds/wrong_item.mp3');
+    const wrongContainer = require('../../WarehouseScanner/assets/sounds/wrong_container.mp3');
     const mergeDone = require('../../WarehouseScanner/assets/sounds/merge_completed.mp3');
 
     function showToast(msg) {
@@ -151,8 +152,9 @@ const Merge = () => {
 
             if (response.data.success) {
                 if (response.data.data.length > 0) {
-                    dispatch(addArrangedBackfillObj(response.data.data));
-                    // setHasMerge(true);
+                    const existingIds = new Set(backfillsArranged.map(obj => obj.orderId));
+                    const newObjs = response.data.data.filter(obj => !existingIds.has(obj.orderId));
+                    newObjs.forEach(obj => dispatch(addArrangedBackfillObj(obj)));
                 } 
                 // else {
                 //     setHasMerge(false);
@@ -185,6 +187,25 @@ const Merge = () => {
             }
         } catch (err) {
             console.log("merge update error");
+            console.error(err.message);
+        }
+    }
+
+    async function updateMergeStatus(mergedOrderNumbers) {
+        try {
+            const response = await axios.post('http://192.168.2.165/api/Order/UpdateMergeCompleted', {
+                token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+                employeeId: user.employeeID,
+                orders: mergedOrderNumbers.map(orderNum => ({ orderId: orderNum }))
+            });
+
+            if (response.data.success) {
+                // console.log("merge status update success");
+            } else {
+                // console.log("merge status update failure:", response.data.reason);
+            }
+        } catch (err) {
+            console.log("merge status update error");
             console.error(err.message);
         }
     }
@@ -256,6 +277,7 @@ const Merge = () => {
             setModalVisible(false);
         } else {
             showToast("Wrong container scanned. Try again.");
+            playSound(wrongContainer)
             setContainerText("");
         }
     }, [containerText])
@@ -284,16 +306,19 @@ const Merge = () => {
 
         if (allLocations.has(scanned)) {
             setDestContainerError("Invalid: cannot use a location as destination container.");
+            playSound(wrongContainer);
             setDestContainerText("");
             return;
         }
         if (allSkus.has(scanned)) {
             setDestContainerError("Invalid: cannot use an item SKU as destination container.");
+            playSound(wrongContainer);
             setDestContainerText("");
             return;
         }
         if (allContainers.has(scanned)) {
             setDestContainerError("Invalid: cannot use an order container as destination container.");
+            playSound(wrongContainer);
             setDestContainerText("");
             return;
         }
@@ -587,11 +612,12 @@ const Merge = () => {
                 const isMerged = mergedOrders.includes(order);
                 const orderItems = ordersArr[i]?.order ?? [];
                 const isInProgress = !isMerged && orderItems.some(item => item.mergeCompleted === true);
+                const customerNumber = orderItems[0]?.customerNumber;
                 return (
                     <TouchableOpacity key={order} onPress={() => handleOrderPress(i, order)}>
                         <View style={styles.orderRow}>
                             <Text style={[styles.orderNum, isMerged && styles.orderNumMerged]}>
-                                {order}
+                                {order}{customerNumber ? ` - ${customerNumber}` : ''}
                             </Text>
                             {isMerged && (
                                 <Text style={styles.checkmark}>✓</Text>
@@ -619,8 +645,9 @@ const Merge = () => {
                         <Text style={styles.modalText}>{mergeMsg || errorMsg}</Text>
                         <TouchableOpacity
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
-                            onPress={() => {
+                            onPress={async () => {
                                 if (mergedOrders.length === orders.length) {
+                                    await updateMergeStatus(mergedOrders);
                                     dispatch(resetParallelState());
                                     setMergeMsg("");
                                     setModalVisible(false);
@@ -691,7 +718,10 @@ const Merge = () => {
                         .reduce((sum, item) => sum + item.scannedQty, 0)
                     }
                 </Text>
-                <Text style={styles.orderNum}>{orders[currentOrder]}</Text>
+                <Text style={styles.orderNum}>
+                    {orders[currentOrder]}
+                    {ordersArr[currentOrder]?.order?.[0]?.customerNumber ? ` - ${ordersArr[currentOrder].order[0].customerNumber}` : ''}
+                </Text>
                 <Text>Scan Items</Text>
                 <TextInput
                     style={styles.TextInput}
