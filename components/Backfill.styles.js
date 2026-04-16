@@ -77,7 +77,7 @@ export default StyleSheet.create({
     rectButton: {
         height: 40,
         marginTop: 20,
-        width: 150,
+        width: 125,
         marginLeft: 'auto',
         marginRight: 'auto',
         textAlign: 'center',

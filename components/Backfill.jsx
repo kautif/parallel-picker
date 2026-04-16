@@ -7,7 +7,7 @@ import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, T
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
-import { addArrangedBackfillObj, addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
+import { addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 
 const Backfill = ({navigation}) => {
@@ -47,6 +47,9 @@ const Backfill = ({navigation}) => {
     const [awaitingToteOnlyRemoval, setAwaitingToteOnlyRemoval] = useState(false);
     // When true, user must scan the tote/containerBarcode after Not Have before continuing
     const [requireToteAfterNotHave, setRequireToteAfterNotHave] = useState(false);
+    // When true, user tapped "Unavailable All Locations" at the first location.
+    // Skip the alternate-location step entirely and finalize after tote scan (if needed).
+    const [unavailableAllLocations, setUnavailableAllLocations] = useState(false);
 
     // const [container, setContainers] = useState();
     const [lastQty, setLastQty] = useState(0);
@@ -132,12 +135,15 @@ const Backfill = ({navigation}) => {
         };
         setupAudio();
 
-        const existingIds = new Set(backfillsArranged.map(obj => obj.orderId));
-        const newObjs = orders
-        .filter(id => !existingIds.has(id))
-        .map(id => ({ orderId: id, order: [] }));
-
-        newObjs.forEach(obj => dispatch(addArrangedBackfillObj(obj)));
+        // NOTE: We used to dispatch addArrangedBackfillObj here with empty stubs
+        // ({ orderId, order: [] }) for every order ID. Backfill itself never
+        // reads those stubs, but they caused a bug downstream: Merge's
+        // getMergedBackfills skips any orderId that's already present in
+        // backfillsArranged, so the stubs would block the real API data from
+        // being added for the first order. That's why the first order's
+        // customerNumber was missing, its item list was empty, and React warned
+        // about a duplicate key (stubs have no orderBackFillItemsId).
+        // Merge already fetches and populates backfillsArranged on its own.
 
         if (backfillItems.length > 0) {
             console.log("backfillItems: ", backfillItems[0].orderId);
@@ -245,8 +251,15 @@ const Backfill = ({navigation}) => {
 
             if (skipLocationScanRef.current) {
                 console.log("Skipping scan, staying at:", lastVerifiedLocRef.current);
-                setAtLocation(true); 
+                setAtLocation(true);
                 skipLocationScanRef.current = false; // Reset the flag
+                // atLocation was already true, so setAtLocation(true) is a no-op and the
+                // [atLocation] effect won't re-run to focus itemRef. Focus it directly here,
+                // and play the pick sound so the UX matches a normal location-verified transition.
+                setTimeout(() => {
+                    itemRef.current?.focus();
+                    playSound(pickItem);
+                }, 0);
             }
         } else if (backfillItems.length === 0 && backfillCompletedRef.current === false) {
             updateBackfill();
@@ -425,6 +438,7 @@ const Backfill = ({navigation}) => {
                 setAlternateLocRequired(false);
                 setAwaitingToteOnlyRemoval(false);
                 setRequireToteAfterNotHave(false);
+                setUnavailableAllLocations(false);
                 isUpdatingQty.current = false;
             }
         } catch (err) {
@@ -699,6 +713,53 @@ const Backfill = ({navigation}) => {
                                 }}>
                                 <Text style={{textAlign: 'center'}}>No</Text>
                             </TouchableOpacity>
+                            {/*
+                                Third option: "Unavailable All Locations".
+                                Only shown at the FIRST location of a two-location item
+                                (i.e. before the user has Not Have'd once and been sent to the alternate).
+                                For single-location items, the existing Yes already means
+                                "unavailable everywhere", so the button adds nothing there.
+                            */}
+                            {(() => {
+                                if (backfillItems.length === 0) return null;
+                                if (alternateLocRequired) return null; // already at alternate — hide
+                                const item = backfillItems[0];
+                                const hasBothLocations = item.location && item.location.length > 0
+                                    && item.binLocation && item.binLocation.length > 0;
+                                if (!hasBothLocations) return null; // single-location item — hide
+
+                                return (
+                                    <TouchableOpacity
+                                        style={{...styles.rectButton, justifyContent: 'center', marginStart: 40}}
+                                        onPress={() => {
+                                            // User is telling us the item isn't available at EITHER location.
+                                            // Do NOT send them to the alternate. Finalize this item now.
+                                            // Record only what (if anything) was scanned at this location.
+                                            pickedLocationsRef.current = [
+                                                { pickLocation: scannedLoc, qty: scannedQty }
+                                            ];
+                                            setUnavailableAllLocations(true);
+
+                                            if (scannedQty > 0) {
+                                                // Qty was scanned — require containerBarcode scan before updateQty.
+                                                // The tote useEffect will fire updateQty once the correct tote is scanned.
+                                                setRequireToteAfterNotHave(true);
+                                                setTote("");
+                                                setTimeout(() => {
+                                                    toteRef.current?.focus();
+                                                    playSound(scanContainerSound);
+                                                }, 500);
+                                            } else {
+                                                // Nothing scanned — no tote needed. Finalize directly with a zero-qty entry.
+                                                updateQty();
+                                            }
+
+                                            setNotHaveVisible(false);
+                                        }}>
+                                        <Text style={{textAlign: 'center'}}>No Locations Available</Text>
+                                    </TouchableOpacity>
+                                );
+                            })()}
                         </View>
                     </View>
                 </View>
@@ -914,9 +975,9 @@ const Backfill = ({navigation}) => {
                                                 playSound(scanContainerSound);
                                                 setTote("");
 
-                                                if (pickedLocationsRef.current.length >= 2) {
-                                                    // Second Not Have — both locations exhausted, finalize
-                                                    console.log("Second Not Have container scan (non-atLocation) — calling updateQty");
+                                                if (pickedLocationsRef.current.length >= 2 || unavailableAllLocations) {
+                                                    // Second Not Have OR Unavailable All Locations — finalize
+                                                    console.log("Finalizing Not Have container scan (non-atLocation) — calling updateQty");
                                                     updateQty();
                                                 } else {
                                                     // First Not Have — clear flag, advance to alternate location
@@ -1146,12 +1207,13 @@ const Backfill = ({navigation}) => {
                                                 console.log("CORRECT CONTAINER BARCODE");
                                                 setTote("");
                                                 
-                                                // Check if this is first or second Not Have by checking pickedLocationsRef length
-                                                if (pickedLocationsRef.current.length === 2) {
-                                                    // SECOND Not Have - both locations stored, finalize with updateQty
+                                                // Check if this is first or second Not Have by checking pickedLocationsRef length,
+                                                // OR if the user tapped "Unavailable All Locations" (which finalizes immediately).
+                                                if (pickedLocationsRef.current.length === 2 || unavailableAllLocations) {
+                                                    // SECOND Not Have or UNAVAILABLE ALL LOCATIONS — finalize with updateQty.
                                                     // Don't play scanContainerSound — updateQty sets atLocation(false)
                                                     // which triggers the atLocation useEffect playing nextItem.
-                                                    console.log("Second Not Have - calling updateQty");
+                                                    console.log("Finalizing after Not Have - calling updateQty");
                                                     updateQty();
                                                 } else {
                                                     // FIRST Not Have - container scanned, now advance to alternate location
