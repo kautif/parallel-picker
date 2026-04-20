@@ -89,6 +89,18 @@ export default StyleSheet.create({
         fontWeight: 'bold',
         textAlign: 'center',
     },
+    clearButton: {
+    marginTop: 20,
+    backgroundColor: 'rgb(0, 85, 165)',
+    padding: 10,
+    width: 110,
+    },
+  clearButtonText: {
+    color: '#fff',
+    textAlign: 'center',
+    fontSize: 18,
+    fontWeight: 'bold',
+    },
     modalText: {
         marginBottom: 5,
         textAlign: 'center',

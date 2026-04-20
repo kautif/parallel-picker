@@ -956,10 +956,17 @@ const Backfill = ({navigation}) => {
                                 </TouchableOpacity>
                             </View>
                         </View>
-                        <Text style={{...styles.heading, marginTop: 10, fontWeight: 'bold'}}>
+                        <Text style={{...styles.heading, marginTop: 10, fontWeight: 'bold', marginLeft: 60}}>
                             {awaitingToteOnlyRemoval ? 'Scan Tote' : (requireToteAfterNotHave ? 'Scan Container' : 'Scan Location')}
                         </Text>
-                        <View style={{flexDirection: 'row', width: 300, marginHorizontal: 'auto'}}>
+                        <View style={{flexDirection: 'row', width: 400, marginHorizontal: 'auto'}}>
+                            <TouchableOpacity
+                                style={styles.clearButton}
+                                onPress={() => {
+                                    setScannedLoc("");
+                                }}>
+                                <Text style={styles.clearButtonText}>Clear</Text>
+                            </TouchableOpacity>
                             {awaitingToteOnlyRemoval || requireToteAfterNotHave ? (
                                 // Require containerBarcode scan (after first Not Have) or tote scan (single-location)
                                 <TextInput
@@ -1093,8 +1100,10 @@ const Backfill = ({navigation}) => {
                                 handleEditIconPress();
                             }}>
                                 <Image 
-                                    style={{width: 50, 
-                                        height: 50
+                                    style={{
+                                        width: 50, 
+                                        height: 50,
+                                        marginTop: 15
                                     }}
                                     source={editIcon}
                                 />
