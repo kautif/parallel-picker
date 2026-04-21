@@ -7,6 +7,8 @@ import { Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, Styl
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addArrangedBackfillObj, resetParallelState } from '../../ParallelPicker/app/redux/parallelSlice';
+import MergeLogger from './MergeLogger';
+import ParallelLogViewer from './ParallelLogViewer';
 const { AudioRouter } = NativeModules;
 
 const Merge = () => {
@@ -152,20 +154,62 @@ const Merge = () => {
 
             if (response.data.success) {
                 if (response.data.data.length > 0) {
+                    // ── Log successful getMergedBackfills ──
+                    const returnedOrderIds = [...new Set(response.data.data.map(obj => String(obj.orderId)))];
+                    // Build a map of orderId -> first containerBarcode seen for that order
+                    const containerMap = {};
+                    response.data.data.forEach(obj => {
+                        if (!containerMap[obj.orderId]) containerMap[obj.orderId] = obj.containerBarcode || '';
+                    });
+                    const returnedContainers = returnedOrderIds.map(id => containerMap[id] || '');
+
+                    MergeLogger.logGetMergedBackfills({
+                        employeeId:   user.employeeID   || 'N/A',
+                        employeeName: user.employeeName || 'Unknown',
+                        httpStatus:   response.status,
+                        orderIds:     returnedOrderIds,
+                        containers:   returnedContainers,
+                        errorMessage: ''
+                    });
+
                     const existingIds = new Set(backfillsArranged.map(obj => obj.orderId));
                     const newObjs = response.data.data.filter(obj => !existingIds.has(obj.orderId));
                     newObjs.forEach(obj => dispatch(addArrangedBackfillObj(obj)));
-                } 
-                // else {
-                //     setHasMerge(false);
-                // } 
-                // console.log("merge update success for item:", item.orderBackFillItemsId);
+                } else {
+                    // Successful response but empty data — still log it
+                    MergeLogger.logGetMergedBackfills({
+                        employeeId:   user.employeeID   || 'N/A',
+                        employeeName: user.employeeName || 'Unknown',
+                        httpStatus:   response.status,
+                        orderIds:     [],
+                        containers:   [],
+                        errorMessage: ''
+                    });
+                }
             } else {
-                // console.log("merge update failure:", response.data.reason);
+                // ── Log API-level failure ──
+                MergeLogger.logGetMergedBackfills({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || 'Unknown',
+                    httpStatus:   response.status,
+                    orderIds:     [],
+                    containers:   [],
+                    errorMessage: response.data.reason || 'Request failed'
+                });
             }
         } catch (err) {
             console.log("merge update error");
             console.error(err.message);
+
+            // ── Log network/exception error ──
+            MergeLogger.logGetMergedBackfills({
+                employeeId:   user.employeeID   || 'N/A',
+                employeeName: user.employeeName || 'Unknown',
+                httpStatus:   err.response?.status || 0,
+                orderIds:     [],
+                containers:   [],
+                errorMessage: err.response?.data?.reason || err.message || 'Network error'
+            });
         }
     }
 
@@ -180,14 +224,61 @@ const Merge = () => {
                 containerItems
             });
 
+            // Derive the destination container(s) from containerItems for logging
+            // containerItems is [{ containerBarcode, qty }, ...] — log the most recent one
+            const latestDestContainer = containerItems.length > 0
+                ? containerItems[containerItems.length - 1].containerBarcode
+                : 'N/A';
+
             if (response.data.success) {
-                // console.log("merge update success for item:", item.orderBackFillItemsId);
+                // ── Log successful updateMergedItem ──
+                MergeLogger.logUpdateMergedItem({
+                    employeeId:     user.employeeID   || 'N/A',
+                    employeeName:   user.employeeName || 'Unknown',
+                    scannedSku:     item.possibleScans?.[0] || 'N/A',
+                    mergedQty:      item.mergedQty,
+                    scannedQty:     item.scannedQty,
+                    orderId:        String(item.orderId),
+                    orderContainer: item.containerBarcode || 'N/A',
+                    destContainer:  latestDestContainer,
+                    httpStatus:     response.status,
+                    errorMessage:   ''
+                });
             } else {
-                // console.log("merge update failure:", response.data.reason);
+                // ── Log API-level failure ──
+                MergeLogger.logUpdateMergedItem({
+                    employeeId:     user.employeeID   || 'N/A',
+                    employeeName:   user.employeeName || 'Unknown',
+                    scannedSku:     item.possibleScans?.[0] || 'N/A',
+                    mergedQty:      item.mergedQty,
+                    scannedQty:     item.scannedQty,
+                    orderId:        String(item.orderId),
+                    orderContainer: item.containerBarcode || 'N/A',
+                    destContainer:  latestDestContainer,
+                    httpStatus:     response.status,
+                    errorMessage:   response.data.reason || 'Request failed'
+                });
             }
         } catch (err) {
             console.log("merge update error");
             console.error(err.message);
+
+            // ── Log network/exception error ──
+            const latestDestContainer = containerItems?.length > 0
+                ? containerItems[containerItems.length - 1].containerBarcode
+                : 'N/A';
+            MergeLogger.logUpdateMergedItem({
+                employeeId:     user.employeeID   || 'N/A',
+                employeeName:   user.employeeName || 'Unknown',
+                scannedSku:     item?.possibleScans?.[0] || 'N/A',
+                mergedQty:      item?.mergedQty ?? 0,
+                scannedQty:     item?.scannedQty ?? 0,
+                orderId:        String(item?.orderId || 'N/A'),
+                orderContainer: item?.containerBarcode || 'N/A',
+                destContainer:  latestDestContainer,
+                httpStatus:     err.response?.status || 0,
+                errorMessage:   err.response?.data?.reason || err.message || 'Network error'
+            });
         }
     }
 
@@ -200,13 +291,36 @@ const Merge = () => {
             });
 
             if (response.data.success) {
-                // console.log("merge status update success");
+                // ── Log successful updateMergeStatus ──
+                MergeLogger.logUpdateMergeStatus({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || 'Unknown',
+                    orderNumbers: mergedOrderNumbers,
+                    httpStatus:   response.status,
+                    errorMessage: ''
+                });
             } else {
-                // console.log("merge status update failure:", response.data.reason);
+                // ── Log API-level failure ──
+                MergeLogger.logUpdateMergeStatus({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || 'Unknown',
+                    orderNumbers: mergedOrderNumbers,
+                    httpStatus:   response.status,
+                    errorMessage: response.data.reason || 'Request failed'
+                });
             }
         } catch (err) {
             console.log("merge status update error");
             console.error(err.message);
+
+            // ── Log network/exception error ──
+            MergeLogger.logUpdateMergeStatus({
+                employeeId:   user.employeeID   || 'N/A',
+                employeeName: user.employeeName || 'Unknown',
+                orderNumbers: mergedOrderNumbers,
+                httpStatus:   err.response?.status || 0,
+                errorMessage: err.response?.data?.reason || err.message || 'Network error'
+            });
         }
     }
 
@@ -763,6 +877,8 @@ const Merge = () => {
             <Animated.View style={[styles.toast, { opacity: toastOpacity }]} pointerEvents="none">
                 <Text style={styles.toastText}>{toastMsg}</Text>
             </Animated.View>
+            {/* Floating log viewer — bottom-left, clear of any modals */}
+            <ParallelLogViewer />
         </SafeAreaView>
     );
 };

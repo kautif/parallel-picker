@@ -9,6 +9,8 @@ import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 import { addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
+import BackfillLogger from './BackfillLogger';
+import ParallelLogViewer from './ParallelLogViewer';
 
 const Backfill = ({navigation}) => {
     const [atLocation, setAtLocation] = useState(false);
@@ -398,6 +400,19 @@ const Backfill = ({navigation}) => {
             });
 
             if (!response.data.success) {
+                // ── Log failed updateQty ──
+                BackfillLogger.logUpdateQty({
+                    employeeId:       user.employeeID   || 'N/A',
+                    employeeName:     user.employeeName || username || 'Unknown',
+                    pickLocations:    pickedLocationsRef.current,
+                    itemSku:          backfillItems[0].gamacode,
+                    orderedQty:       backfillItems[0].orderedQty,
+                    scannedQty:       pickedLocationsRef.current.reduce((sum, loc) => sum + (loc.qty ?? 0), 0),
+                    containerBarcode: backfillItems[0].containerBarcode,
+                    httpStatus:       response.status,
+                    errorMessage:     response.data.reason || 'Request failed'
+                });
+
                 setErrorMsg(response.data.reason);
                 if (!backfillCompletedRef.current) setModalVisible(trFue);
                 isUpdatingQty.current = false;
@@ -407,6 +422,19 @@ const Backfill = ({navigation}) => {
                     setErrorMsg("");
                 }, 2000);
             } else {
+                // ── Log successful updateQty ──
+                BackfillLogger.logUpdateQty({
+                    employeeId:       user.employeeID   || 'N/A',
+                    employeeName:     user.employeeName || username || 'Unknown',
+                    pickLocations:    pickedLocationsRef.current,
+                    itemSku:          backfillItems[0].gamacode,
+                    orderedQty:       backfillItems[0].orderedQty,
+                    scannedQty:       pickedLocationsRef.current.reduce((sum, loc) => sum + (loc.qty ?? 0), 0),
+                    containerBarcode: backfillItems[0].containerBarcode,
+                    httpStatus:       response.status,
+                    errorMessage:     ''
+                });
+
                 const nextBackfillItem = backfillItems[1]; 
                 let isSkipping = false; // Local flag to control immediate state
 
@@ -443,6 +471,20 @@ const Backfill = ({navigation}) => {
             }
         } catch (err) {
             console.error("Error updating order:", err);
+
+            // ── Log network/exception error ──
+            BackfillLogger.logUpdateQty({
+                employeeId:       user.employeeID   || 'N/A',
+                employeeName:     user.employeeName || username || 'Unknown',
+                pickLocations:    pickedLocationsRef.current,
+                itemSku:          backfillItems[0]?.gamacode || 'N/A',
+                orderedQty:       backfillItems[0]?.orderedQty || 0,
+                scannedQty:       pickedLocationsRef.current.reduce((sum, loc) => sum + (loc.qty ?? 0), 0),
+                containerBarcode: backfillItems[0]?.containerBarcode || 'N/A',
+                httpStatus:       err.response?.status || 0,
+                errorMessage:     err.response?.data?.reason || err.message || 'Network error'
+            });
+
             isUpdatingQty.current = false;
         }
     }, [backfillItems, user.employeeID, dispatch]);
@@ -498,15 +540,40 @@ const Backfill = ({navigation}) => {
             })
 
             if (response.data.success) {
+                // ── Log successful updateBackFillCompleted ──
+                BackfillLogger.logUpdateCompleted({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || username || 'Unknown',
+                    httpStatus:   response.status,
+                    errorMessage: ''
+                });
+
                 setBfModalVisible(true);
                 setErrorMsg("Backfill Completed");
                 playSound(backfillDoneSound);
                 lastVerifiedLocRef.current = '';
             } else {
+                // ── Log failed updateBackFillCompleted ──
+                BackfillLogger.logUpdateCompleted({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || username || 'Unknown',
+                    httpStatus:   response.status,
+                    errorMessage: response.data.reason || 'Request failed'
+                });
+
                 backfillCompletedRef.current = false; // reset on failure so it can retry
             }
         } catch (err) {
             console.log("backfill update error: ", err.message);
+
+            // ── Log network/exception error ──
+            BackfillLogger.logUpdateCompleted({
+                employeeId:   user.employeeID   || 'N/A',
+                employeeName: user.employeeName || username || 'Unknown',
+                httpStatus:   err.response?.status || 0,
+                errorMessage: err.response?.data?.reason || err.message || 'Network error'
+            });
+
             backfillCompletedRef.current = false; // reset on error so it can retry
         }
     }, [])
@@ -1494,6 +1561,8 @@ const Backfill = ({navigation}) => {
                 }}
                 >Logout</Text> */}
             </TouchableOpacity>
+            {/* Floating log viewer — bottom-left, clear of logout icon */}
+            <ParallelLogViewer />
         </SafeAreaView>   
     )
 }

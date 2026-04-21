@@ -7,6 +7,8 @@ import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, Tou
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../app/redux/parallelSlice';
+import ParallelLogViewer from './ParallelLogViewer';
+import PrepareLogger from './PrepareLogger';
 
 // Version 0.1
 // 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
@@ -90,6 +92,17 @@ const Prepare = ({navigation}) => {
 
             if (response.data.success) {
                 console.log("backfill success");
+
+                // ── Log successful getBackFillDetails call ──
+                PrepareLogger.logPrepareRequest({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || 'Unknown',
+                    orders,
+                    containers,
+                    httpStatus:   response.status,
+                    errorMessage: ''
+                });
+
                 dispatch(populateBackfill(response.data.data));
                 // console.log("response: ", response);
                 // dispatch(queueBackfill(response.data.data));
@@ -103,11 +116,31 @@ const Prepare = ({navigation}) => {
             } else {
                 console.log("backfill failure");
                 console.log(response.data.reason);
+
+                // ── Log failed getBackFillDetails response ──
+                PrepareLogger.logPrepareRequest({
+                    employeeId:   user.employeeID   || 'N/A',
+                    employeeName: user.employeeName || 'Unknown',
+                    orders,
+                    containers,
+                    httpStatus:   response.status,
+                    errorMessage: response.data.reason || 'Request failed'
+                });
             }
         } catch (err) {
             console.log("backfill error");
             console.error(err.message);
             console.log(err.response?.data?.reason);
+
+            // ── Log network/exception error ──
+            PrepareLogger.logPrepareRequest({
+                employeeId:   user.employeeID   || 'N/A',
+                employeeName: user.employeeName || 'Unknown',
+                orders,
+                containers,
+                httpStatus:   err.response?.status || 0,
+                errorMessage: err.response?.data?.reason || err.message || 'Network error'
+            });
         }       
     }
 
@@ -465,6 +498,8 @@ async function getMergedBackfills () {
             }}
             >Logout</Text> */}
         </TouchableOpacity>
+        {/* Floating log viewer — bottom-left, clear of logout icon */}
+        <ParallelLogViewer />
     </SafeAreaView>
     )
 }
