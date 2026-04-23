@@ -32,7 +32,7 @@ const parallelSlice = createSlice({
         },
         removeOrder: (state, action) => {
             state.orders.splice(action.payload, 1);
-            console.log("order index: ", action.payload);
+            // state.containers.splice(action.payload, 1);
         },
         removeContainer: (state, action) => {
             state.containers.splice(action.payload, 1);

@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../app/redux/parallelSlice';
+import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
 import ParallelLogViewer from './ParallelLogViewer';
 import PrepareLogger from './PrepareLogger';
 
@@ -24,6 +24,7 @@ const Prepare = ({navigation}) => {
     const [errorMsg, setErrorMsg] = useState("");
     const [hasMerge, setHasMerge] = useState(false);
     const [logoutVisible, setLogoutVisible] = useState(false);
+    const [sound, setSound] = useState("");
     // const [picksStarted, setPicksStarted] = useState(false);
 
     const orderRef = useRef('');
@@ -281,12 +282,13 @@ async function getMergedBackfills () {
         if (order.length >= 6) {
             setTimeout(() => {
                 containerRef.current?.focus();
-            }, 500)
+            }, 250)
         }
     }, [order])
 
     useEffect(() => {
         if (container.length >= 6 && order.length >= 6) {
+
             dispatch(addOrder(order));
             dispatch(addBackfillOrderIds({
                 orderId: order
@@ -298,7 +300,7 @@ async function getMergedBackfills () {
             }))
             setTimeout(() => {
                 orderRef.current?.focus();
-            }, 500)
+            }, 250)
         }
     }, [container])
 
@@ -321,13 +323,12 @@ async function getMergedBackfills () {
     }, [initialBackfill])
 
     useEffect(() => {
+        console.log("orders: ", orders);
+        console.log("containers: ", containers);
         if ((orders.length > 0 && containers.length > 0) && orders[orders.length - 1].length >= 6 && containers[containers.length - 1].length >= 6) {
             setOrder("");
             setContainer("");
         }
-
-        console.log("orders: ", orders);
-        console.log("containers: ", containers);
     }, [orders, containers])
 
     return (
@@ -411,8 +412,10 @@ async function getMergedBackfills () {
                 return <View key={i} style={{flexDirection: 'row', justifyContent: 'space-between', width: '25%'}}>
                     <Text style={{fontSize: 20}}>{item}</Text>
                     <TouchableOpacity key={`delete-${i}`} onPress={() => {
+                        console.log("current container: ", containers[i]);
                         dispatch(removeOrder(i));
                         dispatch(removeContainer(i));
+                        dispatch(removeBackfillOrder(i));
                     }}><Image style={{width: 30, height: 30}}source={trashIcon} alt="delete icon" /></TouchableOpacity>
                 </View>
             })}
