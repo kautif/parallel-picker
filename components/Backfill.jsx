@@ -147,6 +147,7 @@ const Backfill = ({navigation}) => {
         // about a duplicate key (stubs have no orderBackFillItemsId).
         // Merge already fetches and populates backfillsArranged on its own.
 
+        backfillCompletedRef.current = false;
         if (backfillItems.length > 0) {
             console.log("backfillItems: ", backfillItems[0].orderId);
             let responseArr = [];

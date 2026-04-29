@@ -17,6 +17,7 @@ const Merge = () => {
 
     const backfillsArranged = useSelector(state => state.parallel.backfillsArranged);
     const backfillItems = useSelector(state => state.parallel.backfillItems);
+    const reduxOrders = useSelector(state => state.parallel.orders);
     // const initialBackfill = useSelector(state => state.parallel.initialBackfill);
     const mergedBackfills = useSelector(state => state.parallel.mergedBackfills);
     const backfillOrderIds = useSelector(state => state.parallel.backfillOrderIds);
@@ -347,6 +348,7 @@ const Merge = () => {
 
     useEffect(() => {
         console.log("MERGE: ", backfillItems);
+        mergeCompletedRef.current = false;
         // getBackFillDetails();
         // setMergeArr([]);
 
@@ -645,7 +647,7 @@ const Merge = () => {
     }, [mergeArr]);
 
     useEffect(() => {
-        if (orders.length > 0 && mergedOrders.length === orders.length) {
+        if (reduxOrders.length > 0 && mergedOrders.length === reduxOrders.length) {
             if (mergeCompletedRef.current) return;
             mergeCompletedRef.current = true;
             playSound(mergeDone);
@@ -760,7 +762,7 @@ const Merge = () => {
                         <TouchableOpacity
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={async () => {
-                                if (mergedOrders.length === orders.length) {
+                                if (mergedOrders.length === reduxOrders.length) {
                                     await updateMergeStatus(mergedOrders);
                                     dispatch(resetParallelState());
                                     setMergeMsg("");
