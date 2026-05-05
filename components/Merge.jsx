@@ -326,23 +326,10 @@ const Merge = () => {
     }
 
     useEffect(() => {
-        let subscription;
-
-        const lockOrientation = async () => {
-            await ScreenOrientation.unlockAsync();
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
-        };
-
-        lockOrientation();
-
-        subscription = ScreenOrientation.addOrientationChangeListener(() => {
-            lockOrientation();
-        });
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
 
         return () => {
-            if (subscription) {
-            ScreenOrientation.removeOrientationChangeListener(subscription);
-            }
+            ScreenOrientation.unlockAsync();
         };
     }, []);
 

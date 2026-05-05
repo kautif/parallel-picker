@@ -247,23 +247,10 @@ async function getMergedBackfills () {
     useEffect(() => {
         getMergedBackfills();
 
-        let subscription;
-
-        const lockOrientation = async () => {
-            await ScreenOrientation.unlockAsync();
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
-        };
-
-        lockOrientation();
-
-        subscription = ScreenOrientation.addOrientationChangeListener(() => {
-            lockOrientation();
-        });
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
 
         return () => {
-            if (subscription) {
-            ScreenOrientation.removeOrientationChangeListener(subscription);
-            }
+            ScreenOrientation.unlockAsync();
         };
     }, []);
 
@@ -311,14 +298,14 @@ async function getMergedBackfills () {
     useEffect(() => {
         if (backfillItems.length > 0 && hasMerge === false && picksStarted === true) {
             console.log("backfillItems: ", backfillItems);
-            router.push('/picker/backfill');
+            router.replace('/picker/backfill');
         }
     }, [backfillItems])
 
     useEffect(() => {
         if (initialBackfill.length > 0 && hasMerge === false) {
             console.log("GO TO BACKFILL");
-            router.push('/picker/backfill');
+            router.replace('/picker/backfill');
         }
     }, [initialBackfill])
 

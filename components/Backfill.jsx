@@ -190,29 +190,37 @@ const Backfill = ({navigation}) => {
             }
         }
 
-        backfillOrderIds.map(item => {
-            if (requiredOrders.length < backfillOrderIds.length) {
-                setRequiredOrders(prevId => [...prevId, String(item.orderId)]);
-            }
-        })
+        // Only require verification for orders not already verified in a prior session.
+        // This prevents returning users from being prompted to verify the same order multiple times.
+        const unverifiedOrders = backfillOrderIds
+            .map(item => String(item.orderId))
+            .filter(orderId => !verifiedOrders.includes(orderId));
+        if (unverifiedOrders.length > 0) {
+            setRequiredOrders(unverifiedOrders);
+        }
 
-        let subscription;
+        // let subscription;
 
-        const lockOrientation = async () => {
-            await ScreenOrientation.unlockAsync();
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
-        };
+        // const lockOrientation = async () => {
+        //     await ScreenOrientation.unlockAsync();
+        //     await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        // };
 
-        lockOrientation();
+        // lockOrientation();
 
-        subscription = ScreenOrientation.addOrientationChangeListener(() => {
-            lockOrientation();
-        });
+        // subscription = ScreenOrientation.addOrientationChangeListener(() => {
+        //     lockOrientation();
+        // });
+
+        // return () => {
+        //     if (subscription) {
+        //         ScreenOrientation.removeOrientationChangeListener(subscription);
+        //     }
+        // };
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
 
         return () => {
-            if (subscription) {
-                ScreenOrientation.removeOrientationChangeListener(subscription);
-            }
+            ScreenOrientation.unlockAsync();
         };
     }, [])
 
@@ -271,7 +279,7 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         if (backfillCompleted === true) {
-            router.push('./merge');
+            router.replace('./merge');
         }
     }, [backfillCompleted])
 
@@ -415,7 +423,7 @@ const Backfill = ({navigation}) => {
                 });
 
                 setErrorMsg(response.data.reason);
-                if (!backfillCompletedRef.current) setModalVisible(trFue);
+                if (!backfillCompletedRef.current) setModalVisible(true);
                 isUpdatingQty.current = false;
                 setTimeout(() => {
                     setModalVisible(false);
@@ -550,7 +558,6 @@ const Backfill = ({navigation}) => {
                 });
 
                 setBfModalVisible(true);
-                setErrorMsg("Backfill Completed");
                 playSound(backfillDoneSound);
                 lastVerifiedLocRef.current = '';
             } else {
@@ -835,16 +842,12 @@ const Backfill = ({navigation}) => {
             <Modal
             animationType="slide"
             transparent={true}
-            visible={modalVisible || bfModalVisible}
+            visible={modalVisible}
             onRequestClose={() => {
                 setErrorMsg("");
                 setScannedLoc("");
                 setTote("");
                 setModalVisible(false);
-                setBfModalVisible(false);
-                if (backfillItems.length === 0) {
-                    setBackfillCompleted(true);
-                }
             }}
             >
                 <View style={styles.centeredView}>
@@ -853,12 +856,32 @@ const Backfill = ({navigation}) => {
                         <TouchableOpacity style={{...styles.button, marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20}}
                         onPress={() => {
                             setModalVisible(false);
-                            setBfModalVisible(false);
                             setErrorMsg("");
-                            if (backfillItems.length === 0) {
-                                setBackfillCompleted(true);
-                            }
                         }}>
+                            <Text style={{color: 'white', fontSize: 20}}>Close</Text>
+                        </TouchableOpacity>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={bfModalVisible}
+                onRequestClose={() => {
+                    setBfModalVisible(false);
+                    setBackfillCompleted(true);
+                }}
+            >
+                <View style={styles.centeredView}>
+                    <View style={styles.modalView}>
+                        <Text style={styles.modalText}>Backfill Completed</Text>
+                        <TouchableOpacity
+                            style={{...styles.button, marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20}}
+                            onPress={() => {
+                                setBfModalVisible(false);
+                                setBackfillCompleted(true);
+                            }}
+                        >
                             <Text style={{color: 'white', fontSize: 20}}>Close</Text>
                         </TouchableOpacity>
                     </View>
