@@ -10,7 +10,8 @@ const initialState = {
     mergedBackfills: [],
     verifiedOrders: [],
     isReturning: false,
-    picksStarted: false
+    picksStarted: false,
+    backfillCompleted: false
 }
 
 const parallelSlice = createSlice({
@@ -61,6 +62,9 @@ const parallelSlice = createSlice({
         arrangeMergedBackfills: (state, action) => {
             state.mergedBackfills = action.payload;
         },
+        setBackfillCompleted: (state, action) => {
+            state.backfillCompleted = true;
+        },
         setIsReturning: (state, action) => {
             state.isReturning = action.payload;
         },
@@ -76,5 +80,5 @@ const parallelSlice = createSlice({
     }
 })
 
-export const { addOrder, addBackfillOrderIds, addContainer, removeOrder, removeContainer, populateBackfill, addBackfill, queueBackfill, removeBackfillItem, addArrangedBackfillObj, addArrangedBackfillItem, arrangeMergedBackfills, setIsReturning, setPicksStarted, addVerifiedOrder, resetParallelState } = parallelSlice.actions;
+export const { addOrder, addBackfillOrderIds, addContainer, removeOrder, removeContainer, populateBackfill, addBackfill, queueBackfill, removeBackfillItem, addArrangedBackfillObj, addArrangedBackfillItem, arrangeMergedBackfills, setBackfillCompleted, setIsReturning, setPicksStarted, addVerifiedOrder, resetParallelState } = parallelSlice.actions;
 export default parallelSlice.reducer;

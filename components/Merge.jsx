@@ -1,12 +1,14 @@
 import axios from 'axios';
 import { Audio } from 'expo-av';
+import { File, Paths } from 'expo-file-system/next';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, BackHandler, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
+import { Animated, BackHandler, Image, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addArrangedBackfillObj, resetParallelState } from '../../ParallelPicker/app/redux/parallelSlice';
+import { addArrangedBackfillObj } from '../../ParallelPicker/app/redux/parallelSlice';
+import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 import MergeLogger from './MergeLogger';
 import ParallelLogViewer from './ParallelLogViewer';
 const { AudioRouter } = NativeModules;
@@ -30,6 +32,7 @@ const Merge = () => {
     // const backfillOrders = useSelector(state => state.parallel.backfillOrders);
     const user = useSelector(state => state.user.user);
     // const orders = useSelector(state => state.parallel.orders);
+    const [responseData, setResponseData] = useState({});
     const [ordersToMerge, setOrdersToMerge] = useState([]);
     const [orders, setOrders] = useState([]);
     const [ordersArr, setOrdersArr] = useState([]);
@@ -42,6 +45,8 @@ const Merge = () => {
 
     const [sound, setSound] = useState();
 
+    const [logoutVisible, setLogoutVisible] = useState(false);
+    const [mergeSuccess, setMergeSuccess] = useState();
     const [modalVisible, setModalVisible] = useState(false);
     const [orderVisible, setOrderVisible] = useState(false);
     const [containerVisible, setContainerVisible] = useState(false);
@@ -59,6 +64,8 @@ const Merge = () => {
     // Toast state
     const [toastMsg, setToastMsg] = useState("");
     const toastOpacity = useRef(new Animated.Value(0)).current;
+
+    const logoutDoor = require('../../WarehouseScanner/assets/images/logout_door.png');
 
     const wrongItem = require('../../WarehouseScanner/assets/sounds/wrong_item.mp3');
     const wrongContainer = require('../../WarehouseScanner/assets/sounds/wrong_container.mp3');
@@ -110,6 +117,33 @@ const Merge = () => {
                 }
             }
         }
+
+        const handleLogout = async () => {
+            try {
+                // console.log("=== LOGOUT START ===");
+                // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
+                // console.log(`Total effect instances created: ${effectCountRef.current}`);
+                // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
+    
+                if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
+                    console.log("logout qty updated");
+                    // await updateQty(); // ensure update completes
+                }
+                dispatch(clearUser());  
+                orderIdRef.current = '';
+                dispatch(setUsername(''));
+                setLogoutVisible(false);
+            } catch (err) {
+    
+            }
+            // navigation.navigate('Scan');
+            // navigation.reset({
+            //     index: 0,
+            //     routes: [{ name: 'Scan' }],
+            // });
+    
+            router.replace('/');
+        };
 
     function handleOrderPress(i, order) {
         if (mergedOrders.includes(order)) {
@@ -186,6 +220,8 @@ const Merge = () => {
                         containers:   [],
                         errorMessage: ''
                     });
+                    setModalVisible(true);
+                    setErrorMsg("No Backfill data Found. Kill application and try again");
                 }
             } else {
                 // ── Log API-level failure ──
@@ -197,6 +233,8 @@ const Merge = () => {
                     containers:   [],
                     errorMessage: response.data.reason || 'Request failed'
                 });
+                setModalVisible(true);
+                setErrorMsg(`Failed to get Merged Backfills \n ${response.data.reason}`);
             }
         } catch (err) {
             console.log("merge update error");
@@ -211,6 +249,8 @@ const Merge = () => {
                 containers:   [],
                 errorMessage: err.response?.data?.reason || err.message || 'Network error'
             });
+            setModalVisible(true);
+            setErrorMsg(`Merged Backfills Network Error \n ${err.response?.data?.reason}`);
         }
     }
 
@@ -245,6 +285,7 @@ const Merge = () => {
                     httpStatus:     response.status,
                     errorMessage:   ''
                 });
+                return true;
             } else {
                 // ── Log API-level failure ──
                 MergeLogger.logUpdateMergedItem({
@@ -259,6 +300,9 @@ const Merge = () => {
                     httpStatus:     response.status,
                     errorMessage:   response.data.reason || 'Request failed'
                 });
+                setModalVisible(true);
+                setErrorMsg(`Merge Item Failed \n ${response.data.reason}`);
+                return false;
             }
         } catch (err) {
             console.log("merge update error");
@@ -280,13 +324,21 @@ const Merge = () => {
                 httpStatus:     err.response?.status || 0,
                 errorMessage:   err.response?.data?.reason || err.message || 'Network error'
             });
+            setModalVisible(true);
+            setErrorMsg(`Merged Item Network Error \n ${err.response?.data?.reason}`);
+            return false;
         }
     }
 
     async function updateMergeStatus(mergedOrderNumbers) {
         try {
-            const response = await axios.post('http://192.168.2.165/api/Order/UpdateMergeCompleted', {
+            setResponseData({
                 token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+                employeeId: user.employeeID,
+                orders: mergedOrderNumbers.map(orderNum => ({ orderId: orderNum }))
+            })
+            const response = await axios.post('http://192.168.2.165/api/Order/UpdateMergeCompleted', {
+                // token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
                 employeeId: user.employeeID,
                 orders: mergedOrderNumbers.map(orderNum => ({ orderId: orderNum }))
             });
@@ -300,6 +352,11 @@ const Merge = () => {
                     httpStatus:   response.status,
                     errorMessage: ''
                 });
+                playSound(mergeDone);
+                setMergeMsg("All Orders Merged!");
+                setModalVisible(true);
+                setMergeSuccess(true);
+                return true
             } else {
                 // ── Log API-level failure ──
                 MergeLogger.logUpdateMergeStatus({
@@ -309,6 +366,10 @@ const Merge = () => {
                     httpStatus:   response.status,
                     errorMessage: response.data.reason || 'Request failed'
                 });
+                setMergeSuccess(false);
+                setErrorMsg(`Merge Failed \n ${response.data.reason}`);
+                setModalVisible(true);
+                return false;
             }
         } catch (err) {
             console.log("merge status update error");
@@ -322,6 +383,9 @@ const Merge = () => {
                 httpStatus:   err.response?.status || 0,
                 errorMessage: err.response?.data?.reason || err.message || 'Network error'
             });
+            setModalVisible(true);
+            setErrorMsg(`Merged Orders Network Error \n ${err.response?.data?.reason}`);
+            return false;
         }
     }
 
@@ -454,7 +518,8 @@ const Merge = () => {
 
         // Only call the API once all quantities for this item have been assigned
         if (updatedItem.mergedQty === updatedItem.scannedQty) {
-            updateMergedItem(updatedItem, updatedContainerItems).then(() => {
+            updateMergedItem(updatedItem, updatedContainerItems).then((success) => {
+                if (!success) return;
                 const orderStillHasItems = updatedArr.some(
                     i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
                 );
@@ -637,9 +702,6 @@ const Merge = () => {
         if (reduxOrders.length > 0 && mergedOrders.length === reduxOrders.length) {
             if (mergeCompletedRef.current) return;
             mergeCompletedRef.current = true;
-            playSound(mergeDone);
-            setMergeMsg("All orders have been successfully merged!");
-            setModalVisible(true);
         }
     }, [mergedOrders]);
 
@@ -750,8 +812,9 @@ const Merge = () => {
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={async () => {
                                 if (mergedOrders.length === reduxOrders.length) {
-                                    await updateMergeStatus(mergedOrders);
-                                    dispatch(resetParallelState());
+                                    // await updateMergeStatus(mergedOrders);
+                                    const success = await updateMergeStatus(mergedOrders);
+                                    if (!success) return;
                                     setMergeMsg("");
                                     setModalVisible(false);
                                     setErrorMsg("");
@@ -779,7 +842,7 @@ const Merge = () => {
                             value={orderText}
                         />
                     </View>}
-                    {containerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}hmmm>
+                    {containerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
                         <Text style={styles.modalText}>Verify Container</Text>
                         <Text style={styles.modalText}>
                             Expected: {ordersArr[currentOrder]?.order?.[0]?.containerBarcode}
@@ -799,15 +862,118 @@ const Merge = () => {
                             <Text style={{color: 'red', fontSize: 16, marginTop: 8, textAlign: 'center'}}>{destContainerError}</Text>
                         )}
                         <TextInput
-                            style={styles.TextInput}
+                            style={{...styles.TextInput, width: 400}}
                             autoFocus={true}
                             showSoftInputOnFocus={false}
                             onChangeText={(newVal) => setDestContainerText(newVal)}
                             value={destContainerText}
                         />
                     </View>}
+                    {mergeSuccess === false && 
+                        <View style={{width: 500, backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
+                            <Text style={{textAlign: 'center', fontSize: 20}}>{errorMsg}</Text>
+                            <View style={{display: 'flex', flexDirection: 'row', justifyContent: 'space-around', width: 500, alignItems: 'center'}}>
+                                <TouchableOpacity
+                                    style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
+                                    onPress={async () => {
+                                        if (mergedOrders.length === reduxOrders.length) {
+                                            // await updateMergeStatus(mergedOrders);
+                                            const success = await updateMergeStatus(mergedOrders);
+                                            if (!success) return;
+                                            setMergeMsg("");
+                                            setModalVisible(false);
+                                            setErrorMsg("");
+                                            setErrorVisible(false);
+                                        } else {
+                                            setMergeMsg("");
+                                            setModalVisible(false);
+                                            setErrorMsg("");
+                                            setErrorVisible(false);
+                                        }
+                                    }}>
+                                <Text style={{color: 'white', fontSize: 15, textAlign: 'center'}}>Retry</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                    style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(163, 19, 19)", paddingHorizontal: 20, textAlign: 'center'}}
+                                    onPress={() => {
+                                        setModalVisible(false);
+                                    }}>
+                                <Text style={{color: 'white', fontSize: 15, textAlign: 'center'}}>Cancel</Text>
+                            </TouchableOpacity>
+                            <TouchableOpacity
+                                    style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(163, 19, 19)", paddingHorizontal: 20, textAlign: 'center'}}
+                                    onPress={() => {
+                                        try {
+                                            const now = new Date();
+                                            const dateStr = `${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}`;
+                                            const employeeId = user?.employeeID ?? 'unknown';
+                                            const fileName = `${dateStr}-${employeeId}.txt`;
+                                            const file = new File(Paths.document, fileName);
+                                            file.create();
+                                            file.write(JSON.stringify(responseData, null, 2));
+                                            showToast(`Saved: ${fileName}`);
+                                        } catch (err) {
+                                            console.error('Save Data for Review error:', err);
+                                            showToast('Failed to save data');
+                                        }
+                                    }}>
+                                <Text style={{color: 'white', fontSize: 15, textAlign: 'center'}}>Save for Review</Text>
+                            </TouchableOpacity>
+                        </View>
+                    </View>
+                    }
                 </View>
             </Modal>
+                       <Modal
+                            animationType="slide"
+                            transparent={true}
+                            visible={logoutVisible}>
+                            <TouchableOpacity
+                                style={{
+                                    backgroundColor: 'black',
+                                    position: 'absolute',
+                                    padding: 15,
+                                    borderRadius: 15
+                                }}
+                                onPress={() => {
+                                    setLogoutVisible(false);
+                                }}
+                                >
+                                <Text style={{ color: 'white', fontSize: 30}}>X</Text>
+                            </TouchableOpacity>
+                            <View style={styles.centeredView}>
+                                <View style={{...styles.modalView, width: 500, padding: 0, flexWrap: 'wrap', flexDirection: 'row'}}>
+                                    <TouchableOpacity 
+                                        style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, padding: 50}}
+                                        onPress={() => {
+                                            handleLogout();
+                                        }}>
+                                        <Text style={{...styles.modalText, fontSize: 30}}>Lunch</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={{width: '50%', borderColor: 'black', borderWidth: 2, borderTopWidth: 2, borderBottomWidth: 1, padding: 50}}
+                                        onPress={() => {
+                                            handleLogout();
+                                        }}>
+                                        <Text style={{...styles.modalText, fontSize: 30}}>Break</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={{width: '50%', borderColor: 'black', borderWidth: 2, borderEndWidth: 1, borderBottomWidth: 2, padding: 50}}
+                                        onPress={() => {
+                                            handleLogout();
+                                        }}>
+                                        <Text style={{...styles.modalText, fontSize: 30}}>Bathroom</Text>
+                                    </TouchableOpacity>
+                                    <TouchableOpacity 
+                                        style={{width: '50%', borderColor: 'black', borderWidth: 2, padding: 50}}
+                                        onPress={() => {
+                                            handleLogout();
+                                        }}>
+                                        <Text style={{...styles.modalText, fontSize: 30}}>Clean</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
             {currentOrder !== null && ordersArr[currentOrder] &&
     <SafeAreaView>
         <View style={styles.mergeContainer}>
@@ -867,6 +1033,30 @@ const Merge = () => {
                 <Text style={styles.toastText}>{toastMsg}</Text>
             </Animated.View>
             {/* Floating log viewer — bottom-left, clear of any modals */}
+                        <TouchableOpacity
+                            style={{
+                                position: 'absolute',
+                                top: 25,
+                                right: 0,
+                                // backgroundColor: '#d61a1a',
+                                paddingHorizontal: 15,
+                                paddingVertical: 10
+                            }}
+                            onPress={() => {
+                                setLogoutVisible(true);
+                            }}
+                            >
+                            <Image 
+                                style={{width: 50, height: 50}}
+                                source={logoutDoor}
+                            />
+                            {/* <Text
+                                style={{
+                                    fontSize: 20,
+                                    color: 'white'
+                            }}
+                            >Logout</Text> */}
+                        </TouchableOpacity>
             <ParallelLogViewer />
         </SafeAreaView>
     );

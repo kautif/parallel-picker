@@ -59,7 +59,7 @@ const Backfill = ({navigation}) => {
     const [errorMsg, setErrorMsg] = useState("");
     const [sending, setSending] = useState(false);
     const [orderComplete, setOrderComplete] = useState(false);
-    const [backfillCompleted, setBackfillCompleted] = useState(false);
+    const [localBackfillCompleted, setLocalBackfillCompleted] = useState(false);
     const [picksCompleted, setPicksCompleted] = useState(0);
 
     const [itemDescriptionVisible, setItemDescriptionVisible] = useState(false);
@@ -76,6 +76,7 @@ const Backfill = ({navigation}) => {
     const backfillItems = useSelector(state => state.parallel.backfillItems);
     const backfillOrderIds = useSelector(state => state.parallel.backfillOrderIds);
     const backfillsArranged = useSelector(state => state.parallel.backfillsArranged);
+    const backfillCompletedRedux = useSelector(state => state.parallel.backfillCompleted);
     const isReturning = useSelector(state => state.parallel.isReturning);
     const picksStarted = useSelector(state => state.parallel.picksStarted);
     let username = useSelector(state => state.user.name);
@@ -147,7 +148,8 @@ const Backfill = ({navigation}) => {
         // about a duplicate key (stubs have no orderBackFillItemsId).
         // Merge already fetches and populates backfillsArranged on its own.
 
-        backfillCompletedRef.current = false;
+        // backfillCompletedRef.current = false;
+        backfillCompletedRef.current = backfillCompletedRedux;
         if (backfillItems.length > 0) {
             console.log("backfillItems: ", backfillItems[0].orderId);
             let responseArr = [];
@@ -278,10 +280,10 @@ const Backfill = ({navigation}) => {
     }, [backfillItems]);
 
     useEffect(() => {
-        if (backfillCompleted === true) {
+        if (localBackfillCompleted === true) {
             router.replace('./merge');
         }
-    }, [backfillCompleted])
+    }, [localBackfillCompleted])
 
     useEffect(() => {
         if (showKeyboard === true) {
@@ -393,6 +395,12 @@ const Backfill = ({navigation}) => {
 
     const updateQty = useCallback(async () => {
         if (isUpdatingQty.current) return;
+            if (!user.employeeID) {
+            setErrorMsg('Cannot update: missing employee ID');
+            setModalVisible(true);
+            return;
+        }
+    isUpdatingQty.current = true;
         isUpdatingQty.current = true;
         console.log("UPDATING backfill quantity");
         console.log("employee id: ", user.employeeID);
@@ -421,15 +429,14 @@ const Backfill = ({navigation}) => {
                     httpStatus:       response.status,
                     errorMessage:     response.data.reason || 'Request failed'
                 });
-
-                setErrorMsg(response.data.reason);
+                setErrorMsg(`Update Backfill Item Fail \n ${response.data.reason}`);
                 if (!backfillCompletedRef.current) setModalVisible(true);
                 isUpdatingQty.current = false;
-                setTimeout(() => {
-                    setModalVisible(false);
-                    setOrderNum("");
-                    setErrorMsg("");
-                }, 2000);
+                // setTimeout(() => {
+                //     setModalVisible(false);
+                //     setOrderNum("");
+                //     setErrorMsg("");
+                // }, 2000);
             } else {
                 // ── Log successful updateQty ──
                 BackfillLogger.logUpdateQty({
@@ -493,7 +500,8 @@ const Backfill = ({navigation}) => {
                 httpStatus:       err.response?.status || 0,
                 errorMessage:     err.response?.data?.reason || err.message || 'Network error'
             });
-
+            setErrorMsg(`Update Backfill Item Network Error \n ${err.response?.data?.reason}`);
+            setModalVisible(true);
             isUpdatingQty.current = false;
         }
     }, [backfillItems, user.employeeID, dispatch]);
@@ -557,6 +565,7 @@ const Backfill = ({navigation}) => {
                     errorMessage: ''
                 });
 
+                // dispatch(setBackfillCompleted(true));
                 setBfModalVisible(true);
                 playSound(backfillDoneSound);
                 lastVerifiedLocRef.current = '';
@@ -568,7 +577,8 @@ const Backfill = ({navigation}) => {
                     httpStatus:   response.status,
                     errorMessage: response.data.reason || 'Request failed'
                 });
-
+                setErrorMsg(`Backfill Item Update Failed \n ${response.data.reason}`);
+                setModalVisible(true);
                 backfillCompletedRef.current = false; // reset on failure so it can retry
             }
         } catch (err) {
@@ -581,7 +591,8 @@ const Backfill = ({navigation}) => {
                 httpStatus:   err.response?.status || 0,
                 errorMessage: err.response?.data?.reason || err.message || 'Network error'
             });
-
+            setErrorMsg(`Backfill Item Update Network Error \n ${err.response?.data?.reason}`);
+            setModalVisible(true);
             backfillCompletedRef.current = false; // reset on error so it can retry
         }
     }, [])
@@ -847,6 +858,7 @@ const Backfill = ({navigation}) => {
                 setErrorMsg("");
                 setScannedLoc("");
                 setTote("");
+                setOrderNum("");
                 setModalVisible(false);
             }}
             >
@@ -869,7 +881,7 @@ const Backfill = ({navigation}) => {
                 visible={bfModalVisible}
                 onRequestClose={() => {
                     setBfModalVisible(false);
-                    setBackfillCompleted(true);
+                    setLocalBackfillCompleted(true)
                 }}
             >
                 <View style={styles.centeredView}>
@@ -879,7 +891,7 @@ const Backfill = ({navigation}) => {
                             style={{...styles.button, marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20}}
                             onPress={() => {
                                 setBfModalVisible(false);
-                                setBackfillCompleted(true);
+                                setLocalBackfillCompleted(true)
                             }}
                         >
                             <Text style={{color: 'white', fontSize: 20}}>Close</Text>
@@ -1505,7 +1517,7 @@ const Backfill = ({navigation}) => {
                                             }, 500)
                                         }
 
-                                       if (newVal === backfillItems[0].gamacode || newVal === backfillItems[0].itemLookupCode || aliasFound) {
+                                       if (newVal === backfillItems[0].itemLookupCode || aliasFound) {
                                             setScannedQty(prevQty => Math.min(prevQty + 1, backfillItems[0].orderedQty));
                                         } else if (backfillItems && multiplierFound) {
                                             setScannedQty(prevQty => Math.min(
