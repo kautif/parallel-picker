@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Animated, BackHandler, Image, Modal, NativeModules, Platform, ScrollView, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addArrangedBackfillObj } from '../../ParallelPicker/app/redux/parallelSlice';
+import { addArrangedBackfillObj, resetParallelState } from '../../ParallelPicker/app/redux/parallelSlice';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 import MergeLogger from './MergeLogger';
 import ParallelLogViewer from './ParallelLogViewer';
@@ -57,6 +57,7 @@ const Merge = () => {
     const mergeArrBuilt = useRef(false);
     const mergeCompletedRef = useRef(false);
     const pendingMergeItem = useRef(null);
+    const [allNotHave, setAllNotHave] = useState(false);
 
     // Plain array instead of Set — reliable React re-renders
     const [mergedOrders, setMergedOrders] = useState([]);
@@ -211,7 +212,8 @@ const Merge = () => {
                     const newObjs = response.data.data.filter(obj => !existingIds.has(obj.orderId));
                     newObjs.forEach(obj => dispatch(addArrangedBackfillObj(obj)));
                 } else {
-                    // Successful response but empty data — still log it
+                    // Successful response but empty data — all items were marked Not Have.
+                    // Treat this as a completed backfill with nothing to merge.
                     MergeLogger.logGetMergedBackfills({
                         employeeId:   user.employeeID   || 'N/A',
                         employeeName: user.employeeName || 'Unknown',
@@ -220,8 +222,11 @@ const Merge = () => {
                         containers:   [],
                         errorMessage: ''
                     });
+                    playSound(mergeDone);
+                    setMergeMsg("Merge Completed");
+                    setMergeSuccess(true);
+                    setAllNotHave(true);
                     setModalVisible(true);
-                    setErrorMsg("No Backfill data Found. Kill application and try again");
                 }
             } else {
                 // ── Log API-level failure ──
@@ -233,8 +238,19 @@ const Merge = () => {
                     containers:   [],
                     errorMessage: response.data.reason || 'Request failed'
                 });
-                setModalVisible(true);
-                setErrorMsg(`Failed to get Merged Backfills \n ${response.data.reason}`);
+                // If the API returned no data because all items were Not Have'd,
+                // treat it as a completed merge rather than a hard error.
+                const noItemsWereScanned = backfillItems.length === 0;
+                if (noItemsWereScanned) {
+                    playSound(mergeDone);
+                    setMergeMsg("Merge Completed");
+                    setMergeSuccess(true);
+                    setAllNotHave(true);
+                    setModalVisible(true);
+                } else {
+                    setModalVisible(true);
+                    setErrorMsg(`Failed to get Merged Backfills \n ${response.data.reason}`);
+                }
             }
         } catch (err) {
             console.log("merge update error");
@@ -338,7 +354,7 @@ const Merge = () => {
                 orders: mergedOrderNumbers.map(orderNum => ({ orderId: orderNum }))
             })
             const response = await axios.post('http://192.168.2.165/api/Order/UpdateMergeCompleted', {
-                // token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
+                token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
                 employeeId: user.employeeID,
                 orders: mergedOrderNumbers.map(orderNum => ({ orderId: orderNum }))
             });
@@ -390,9 +406,14 @@ const Merge = () => {
     }
 
     useEffect(() => {
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        const lock = async () => {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        };
+
+        const timer = setTimeout(lock, 100);
 
         return () => {
+            clearTimeout(timer);
             ScreenOrientation.unlockAsync();
         };
     }, []);
@@ -525,8 +546,14 @@ const Merge = () => {
                 );
 
                 if (!orderStillHasItems) {
-                    setMergedOrders(prev => [...prev, currentOrderLabel]);
-                    setMergeMsg(`${currentOrderLabel} merged`);
+                    setMergedOrders(prev => {
+                        const updated = [...prev, currentOrderLabel];
+                        // Only show the per-order message if there are still orders left
+                        if (updated.length < reduxOrders.length) {
+                            setMergeMsg(`${currentOrderLabel} merged`);
+                        }
+                        return updated;
+                    });
                     setCurrentOrder(null);
                     setModalVisible(true);
                 } else {
@@ -563,7 +590,7 @@ const Merge = () => {
                     index === self.findIndex(i => i.orderBackFillItemsId === item.orderBackFillItemsId)
             ).map(item => ({ ...item, orderId: String(item.orderId) }));
 
-            const uniqueOrderIds = [...new Set(flatItems.map(item => String(item.orderId)))];
+            const uniqueOrderIds = [...new Set(reduxOrders.map(o => String(o.orderId ?? o)))];
             setOrders(uniqueOrderIds);
 
             const grouped = flatItems.reduce((acc, item) => {
@@ -582,10 +609,16 @@ const Merge = () => {
                 .filter(obj => obj.order.every(item => item.mergeCompleted === true))
                 .map(obj => obj.orderId);
 
-            if (alreadyMerged.length > 0) {
+            const orderIdsWithItems = new Set(flatItems.map(item => String(item.orderId)));
+            const notHaveOrders = reduxOrders
+                .map(o => String(o.orderId ?? o))
+                .filter(id => !orderIdsWithItems.has(id));
+            const allPreMerged = [...alreadyMerged, ...notHaveOrders];
+
+            if (allPreMerged.length > 0) {
                 setMergedOrders(prev => {
                     const combined = [...prev];
-                    alreadyMerged.forEach(id => {
+                    allPreMerged.forEach(id => {
                         if (!combined.includes(id)) combined.push(id);
                     });
                     return combined;
@@ -683,15 +716,9 @@ const Merge = () => {
     }, [ordersArr]);
 
     useEffect(() => {
-        const filterByOrderId = (arr, id) => {
-            return arr.filter(obj => obj.orderId === id);
-        };
-
-        if (currentOrder !== null) {
-            filterByOrderId(mergeArr, parseInt(orders[currentOrder]));
-        } else {
-            getMergedBackfills();
-        }
+        // if (currentOrder !== null) {
+        //     filterByOrderId(mergeArr, parseInt(orders[currentOrder]));
+        // }
     }, [currentOrder]);
 
     useEffect(() => {
@@ -702,6 +729,10 @@ const Merge = () => {
         if (reduxOrders.length > 0 && mergedOrders.length === reduxOrders.length) {
             if (mergeCompletedRef.current) return;
             mergeCompletedRef.current = true;
+            playSound(mergeDone);
+            setMergeMsg("All Orders Merged!");
+            setModalVisible(true);
+            setMergeSuccess(true);
         }
     }, [mergedOrders]);
 
@@ -811,7 +842,15 @@ const Merge = () => {
                         <TouchableOpacity
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={async () => {
-                                if (mergedOrders.length === reduxOrders.length) {
+                                if (allNotHave) {
+                                    // All items were Not Have — nothing to merge, just reset and go back
+                                    dispatch(resetParallelState());
+                                    dispatch(clearUser());
+                                    dispatch(setUsername(''));
+                                    setMergeMsg("");
+                                    setModalVisible(false);
+                                    router.replace('/');
+                                } else if (mergedOrders.length === reduxOrders.length) {
                                     // await updateMergeStatus(mergedOrders);
                                     const success = await updateMergeStatus(mergedOrders);
                                     if (!success) return;
