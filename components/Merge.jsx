@@ -541,24 +541,21 @@ const Merge = () => {
         if (updatedItem.mergedQty === updatedItem.scannedQty) {
             updateMergedItem(updatedItem, updatedContainerItems).then((success) => {
                 if (!success) return;
-                const orderStillHasItems = updatedArr.some(
-                    i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
-                );
-
-                if (!orderStillHasItems) {
-                    setMergedOrders(prev => {
-                        const updated = [...prev, currentOrderLabel];
-                        // Only show the per-order message if there are still orders left
-                        if (updated.length < reduxOrders.length) {
+                    const orderStillHasItems = updatedArr.some(
+                        i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
+                    );
+                    if (!orderStillHasItems) {
+                        const isLastOrder = mergedOrders.length + 1 === reduxOrders.length;
+                        if (!isLastOrder) {
                             setMergeMsg(`${currentOrderLabel} merged`);
+                            setModalVisible(true);
                         }
-                        return updated;
-                    });
-                    setCurrentOrder(null);
-                    setModalVisible(true);
-                } else {
-                    setModalVisible(false);
-                }
+                        // If isLastOrder, the mergedOrders useEffect will set mergeMsg + setModalVisible
+                        setMergedOrders(prev => [...prev, currentOrderLabel]);
+                        setCurrentOrder(null);
+                    } else {
+                        setModalVisible(false);
+                    }
             });
         } else {
             setModalVisible(false);
@@ -590,7 +587,7 @@ const Merge = () => {
                     index === self.findIndex(i => i.orderBackFillItemsId === item.orderBackFillItemsId)
             ).map(item => ({ ...item, orderId: String(item.orderId) }));
 
-            const uniqueOrderIds = [...new Set(reduxOrders.map(o => String(o.orderId ?? o)))];
+            const uniqueOrderIds = [...new Set(flatItems.map(item => String(item.orderId)))];
             setOrders(uniqueOrderIds);
 
             const grouped = flatItems.reduce((acc, item) => {
@@ -625,6 +622,7 @@ const Merge = () => {
                 });
             }
         }
+        mergeArrBuilt.current = false;
     }, [backfillsArranged]);
 
     useEffect(() => {
@@ -749,7 +747,7 @@ const Merge = () => {
 
         const matchIndex = mergeArr.findIndex(
             item =>
-                item.orderId === currentOrderId &&
+                String(item.orderId) === String(currentOrderId) &&
                 (item.possibleScans.includes(scanText) || item.upcList.some(u => u.upc === scanText))
         );
 
@@ -842,22 +840,22 @@ const Merge = () => {
                         <TouchableOpacity
                             style={{...styles.button, marginLeft: 'auto', marginRight: 'auto', marginTop: '20', backgroundColor: "rgb(0, 85, 165)", paddingHorizontal: 20, textAlign: 'center'}}
                             onPress={async () => {
-                                if (allNotHave) {
-                                    // All items were Not Have — nothing to merge, just reset and go back
-                                    dispatch(resetParallelState());
-                                    dispatch(clearUser());
-                                    dispatch(setUsername(''));
-                                    setMergeMsg("");
-                                    setModalVisible(false);
-                                    router.replace('/');
-                                } else if (mergedOrders.length === reduxOrders.length) {
-                                    // await updateMergeStatus(mergedOrders);
+                            if (allNotHave) {
+                                dispatch(resetParallelState());
+                                dispatch(clearUser());
+                                dispatch(setUsername(''));
+                                setMergeMsg("");
+                                setModalVisible(false);
+                                await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                                router.replace('/');
+                                } else if (mergeMsg === "All Orders Merged!") {
                                     const success = await updateMergeStatus(mergedOrders);
                                     if (!success) return;
                                     setMergeMsg("");
                                     setModalVisible(false);
                                     setErrorMsg("");
                                     setErrorVisible(false);
+                                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
                                     router.replace('../../warehouse/scan');
                                 } else {
                                     setMergeMsg("");
