@@ -856,7 +856,7 @@ const Merge = () => {
                                     setErrorMsg("");
                                     setErrorVisible(false);
                                     await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-                                    router.replace('../../warehouse/scan');
+                                    router.replace('/');
                                 } else {
                                     setMergeMsg("");
                                     setModalVisible(false);
@@ -888,7 +888,15 @@ const Merge = () => {
                             style={styles.TextInput}
                             autoFocus={true}
                             showSoftInputOnFocus={false}
-                            onChangeText={(newVal) => setContainerText(newVal)}
+                            onChangeText={(newVal) => {
+                                if (newVal.startsWith("TA")) {
+                                    setErrorMsg("Not a valid container");
+                                    setModalVisible(true);
+                                    playSound(wrongContainer);
+                                } else {
+                                    setContainerText(newVal);
+                                }
+                            }}
                             value={containerText}
                         />
                     </View>}
@@ -902,7 +910,15 @@ const Merge = () => {
                             style={{...styles.TextInput, width: 400}}
                             autoFocus={true}
                             showSoftInputOnFocus={false}
-                            onChangeText={(newVal) => setDestContainerText(newVal)}
+                            onChangeText={(newVal) => {
+                                if (newVal.startsWith("TA")) {
+                                    setErrorMsg("Not a valid container");
+                                    setModalVisible(true);
+                                    playSound(wrongContainer);
+                                } else {
+                                    setDestContainerText(newVal);
+                                }
+                            }}
                             value={destContainerText}
                         />
                     </View>}

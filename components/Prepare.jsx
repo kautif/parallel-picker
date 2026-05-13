@@ -22,13 +22,14 @@ const Prepare = ({navigation}) => {
     const [container, setContainer] = useState("");
     const [modalVisible, setModalVisible] = useState(false);
     const [errorMsg, setErrorMsg] = useState("");
-    const [hasMerge, setHasMerge] = useState(false);
+    const [hasMerge, setHasMerge] = useState(null);
     const [logoutVisible, setLogoutVisible] = useState(false);
     const [sound, setSound] = useState("");
     // const [picksStarted, setPicksStarted] = useState(false);
 
     const orderRef = useRef('');
     const containerRef = useRef('');
+    const pendingBackfillsFetchedRef = useRef(false);
 
     const user = useSelector(state => state.user.user);
     const backfillOrders = useSelector(state => state.parallel.backfillOrders);
@@ -80,15 +81,18 @@ const Prepare = ({navigation}) => {
         }
     }
 
-    async function getBackFillDetails () {
+    async function getBackFillDetails (ordersOverride) {
         console.log("starting getBackfill");
         try {
             console.log("entering getBackfill try");
             console.log("backfill orders: ", orders);
+                const ordersToSend = ordersOverride ?? backfillOrders;
+    console.log("ordersToSend: ", JSON.stringify(ordersToSend));
+    console.log("employeeId: ", user.employeeID);
             const response = await axios.post('http://192.168.2.165/api/Order/getBackFillDetails' , {
                 token: "Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx",
-                EmployeeId: user.employeeID,
-                Orders: backfillOrders
+                employeeId: user.employeeID,
+                Orders: ordersToSend
             })
 
             if (response.data.success) {
@@ -181,12 +185,13 @@ const Prepare = ({navigation}) => {
             })
 
             console.log("backfill success: ", response.data.success);
-            if (response.data.success && response.data.data.length > 0) {
+            if (response.data.success && response.data.data && response.data.data.length > 0) {
+                console.log("=== response.data.data:", JSON.stringify(response.data.data));
                 dispatch(setIsReturning(true));
                 dispatch(setPicksStarted(true));
-                const orderPayload = [...new Set(response.data.data.map(item => item.orderId))]
-                .map(id => ({ orderId: id }));
+                const orderPayload = [...new Set(response.data.data.map(item => item.orderId))].map(id => ({ orderId: id }));
                 dispatch(addBackfillOrderIds(orderPayload));
+                console.log("=== orderPayload to be dispatched:", JSON.stringify(orderPayload));
                 console.log("backfill success");
                 // dispatch(populateBackfill(response.data.data));
                 // console.log("response: ", response);
@@ -233,13 +238,19 @@ async function getMergedBackfills () {
                 if (pruneBackfill.length > 0) {
                     dispatch(queueBackfill(pruneBackfill));
                     setHasMerge(true);
-                    console.log("getMerged: ", hasMerge);
+                } else {
+                    setHasMerge(false); // ← had data but all merges completed
                 }
+            } else {
+                setHasMerge(false); // ← success but no data
             }
-        } 
+        } else {
+            setHasMerge(false); // ← success: false
+        }
     } catch (err) {
         console.log("merge update error");
         console.error(err.message);
+        setHasMerge(false); // ← network/exception error
     }
 }
 
@@ -255,11 +266,12 @@ async function getMergedBackfills () {
     }, []);
 
     useEffect(() => {
-        console.log("hasMerge: ", hasMerge);
+        console.log("=== hasMerge effect fired, hasMerge:", hasMerge);
+        if (hasMerge === null) return; // ← not yet determined, wait for getMergedBackfills
+            console.log("hasMerge: ", hasMerge);
         if (hasMerge === false) {
             getPendingBackfills();
         }
-
         if (hasMerge === true) {
             router.push('/picker/merge');
         }
@@ -459,7 +471,11 @@ async function getMergedBackfills () {
                 ></TextInput>
             </View>
             <TouchableOpacity style={styles.button} onPress={() => {
-                getBackFillDetails();
+                const currentOrders = orders.map((orderId, i) => ({
+                    OrderId: parseInt(orderId),
+                    ContainerBarcode: containers[i]
+                }));
+                getBackFillDetails(currentOrders);
             }}>
                 <Text style={styles.buttonText}>Next</Text>
             </TouchableOpacity>

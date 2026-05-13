@@ -22,11 +22,10 @@ const parallelSlice = createSlice({
             state.orders.push(action.payload);
         },
         addBackfillOrderIds: (state, action) => {
-            if (Array.isArray(action.payload)) {
-                state.backfillOrderIds.push(...action.payload);
-            } else {
-                state.backfillOrderIds.push(action.payload);
-            }
+            const incoming = Array.isArray(action.payload) ? action.payload : [action.payload];
+            const existingIds = new Set(state.backfillOrderIds.map(item => String(item.orderId)));
+            const newIds = incoming.filter(item => !existingIds.has(String(item.orderId)));
+            state.backfillOrderIds.push(...newIds);
         },
         addContainer: (state, action) => {
             state.containers.push(action.payload);
@@ -74,11 +73,14 @@ const parallelSlice = createSlice({
         addVerifiedOrder: (state, action) => {
             state.verifiedOrders.push(action.payload);
         },
+        clearVerifiedOrders: (state) => {
+            state.verifiedOrders = [];
+        },
         resetParallelState: (state) => {
             return initialState;
         }
     }
 })
 
-export const { addOrder, addBackfillOrderIds, addContainer, removeOrder, removeContainer, populateBackfill, addBackfill, queueBackfill, removeBackfillItem, addArrangedBackfillObj, addArrangedBackfillItem, arrangeMergedBackfills, setBackfillCompleted, setIsReturning, setPicksStarted, addVerifiedOrder, resetParallelState } = parallelSlice.actions;
+export const { addOrder, addBackfillOrderIds, addContainer, removeOrder, removeContainer, populateBackfill, addBackfill, queueBackfill, removeBackfillItem, addArrangedBackfillObj, addArrangedBackfillItem, arrangeMergedBackfills, setBackfillCompleted, setIsReturning, setPicksStarted, addVerifiedOrder, clearVerifiedOrders, resetParallelState } = parallelSlice.actions;
 export default parallelSlice.reducer;

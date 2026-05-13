@@ -7,7 +7,7 @@ import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, T
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
-import { addVerifiedOrder, removeBackfillItem } from '../app/redux/parallelSlice';
+import { addVerifiedOrder, clearVerifiedOrders, removeBackfillItem } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 import BackfillLogger from './BackfillLogger';
 import ParallelLogViewer from './ParallelLogViewer';
@@ -102,7 +102,10 @@ const Backfill = ({navigation}) => {
 
     const backfillOrderIdsRef = useRef(backfillOrderIds);
     useEffect(() => {
-        backfillOrderIdsRef.current = backfillOrderIds;
+        if (backfillOrderIds.length > 0) {
+            const allOrderIds = [...new Set(backfillOrderIds.map(item => String(item.orderId)))];
+            setRequiredOrders(allOrderIds);
+        }
     }, [backfillOrderIds]);
 
     const nextItem = require('../../WarehouseScanner/assets/sounds/next_item.mp3');
@@ -149,6 +152,7 @@ const Backfill = ({navigation}) => {
         // Merge already fetches and populates backfillsArranged on its own.
 
         // backfillCompletedRef.current = false;
+        dispatch(clearVerifiedOrders());
         backfillCompletedRef.current = backfillCompletedRedux;
         if (backfillItems.length > 0) {
             console.log("backfillItems: ", backfillItems[0].orderId);
@@ -190,15 +194,6 @@ const Backfill = ({navigation}) => {
             if (hasScannedBefore) {
                 setScannedBefore(true);
             }
-        }
-
-        // Only require verification for orders not already verified in a prior session.
-        // This prevents returning users from being prompted to verify the same order multiple times.
-        const unverifiedOrders = backfillOrderIds
-            .map(item => String(item.orderId))
-            .filter(orderId => !verifiedOrders.includes(orderId));
-        if (unverifiedOrders.length > 0) {
-            setRequiredOrders(unverifiedOrders);
         }
 
         // let subscription;
@@ -377,7 +372,8 @@ const Backfill = ({navigation}) => {
                 console.log("logout qty updated");
                 // await updateQty(); // ensure update completes
             }
-            dispatch(clearUser());  
+            dispatch(clearUser()); 
+            dispatch(resetParallelState()); 
             orderIdRef.current = '';
             dispatch(setUsername(''));
             setLogoutVisible(false);
@@ -902,7 +898,7 @@ const Backfill = ({navigation}) => {
             <Modal
             animationType="slide"
             transparent={true}
-            visible={picksStarted && isReturning && verifiedOrders.length !== backfillOrderIds.length}>
+            visible={picksStarted && isReturning && requiredOrders.length > 0}>
                 <View style={styles.centeredView}>
                     <View style={styles.modalView}>
                         <Text style={styles.modalText}>Verify Order {requiredOrders[0]}</Text>
@@ -913,7 +909,7 @@ const Backfill = ({navigation}) => {
                             showSoftInputOnFocus={false}
                             onChangeText={async (newVal) => {
                                 setVerifyOrderVal(newVal);
-                                if (newVal.slice(0, 6) === requiredOrders[0].slice(0,6)) {
+                                if (newVal.slice(0, 6) === requiredOrders[0].slice(0,6) && !newVal.startsWith("TA")) {
                                     // setVerifyOrder(true);
                                     setRequiredOrders(prevOrders => prevOrders.slice(1));
                                     dispatch(addVerifiedOrder(newVal));
@@ -1517,7 +1513,7 @@ const Backfill = ({navigation}) => {
                                             }, 500)
                                         }
 
-                                       if (newVal === backfillItems[0].itemLookupCode || aliasFound) {
+                                       if ((newVal === backfillItems[0].itemLookupCode || aliasFound) && !newVal.includes("TA")) {
                                             setScannedQty(prevQty => Math.min(prevQty + 1, backfillItems[0].orderedQty));
                                         } else if (backfillItems && multiplierFound) {
                                             setScannedQty(prevQty => Math.min(
