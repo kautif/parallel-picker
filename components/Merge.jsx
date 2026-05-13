@@ -851,6 +851,9 @@ const Merge = () => {
                                 } else if (mergeMsg === "All Orders Merged!") {
                                     const success = await updateMergeStatus(mergedOrders);
                                     if (!success) return;
+                                    dispatch(resetParallelState());
+                                    dispatch(clearUser());
+                                    dispatch(setUsername(''));
                                     setMergeMsg("");
                                     setModalVisible(false);
                                     setErrorMsg("");
