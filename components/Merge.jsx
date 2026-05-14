@@ -49,6 +49,9 @@ const Merge = () => {
     const [mergeSuccess, setMergeSuccess] = useState();
     const [modalVisible, setModalVisible] = useState(false);
     const [orderVisible, setOrderVisible] = useState(false);
+    const [orderMergedModalVisible, setOrderMergedModalVisible] = useState(false);
+    const [orderMergedLabel, setOrderMergedLabel] = useState("");
+    const [allOrdersMergedModalVisible, setAllOrdersMergedModalVisible] = useState(false);
     const [containerVisible, setContainerVisible] = useState(false);
     const [destContainerVisible, setDestContainerVisible] = useState(false);
     const [destContainerText, setDestContainerText] = useState("");
@@ -57,6 +60,7 @@ const Merge = () => {
     const mergeArrBuilt = useRef(false);
     const mergeCompletedRef = useRef(false);
     const pendingMergeItem = useRef(null);
+    const userHasCompletedOrder = useRef(false);
     const [allNotHave, setAllNotHave] = useState(false);
 
     // Plain array instead of Set — reliable React re-renders
@@ -533,14 +537,11 @@ const Merge = () => {
                         i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
                     );
                     if (!orderStillHasItems) {
-                        const isLastOrder = mergedOrders.length + 1 === reduxOrders.length;
-                        if (!isLastOrder) {
-                            setMergeMsg(`${currentOrderLabel} merged`);
-                            setModalVisible(true);
-                        }
-                        // If isLastOrder, the mergedOrders useEffect will set mergeMsg + setModalVisible
                         setMergedOrders(prev => [...prev, currentOrderLabel]);
                         setCurrentOrder(null);
+                        setOrderMergedLabel(currentOrderLabel);
+                        userHasCompletedOrder.current = true;
+                        setOrderMergedModalVisible(true); // always show, even for last order
                     } else {
                         setModalVisible(false);
                     }
@@ -712,13 +713,15 @@ const Merge = () => {
     }, [mergeArr]);
 
     useEffect(() => {
+        if (!userHasCompletedOrder.current) return;
         if (reduxOrders.length > 0 && mergedOrders.length === reduxOrders.length) {
             if (mergeCompletedRef.current) return;
             mergeCompletedRef.current = true;
+            // Close single-order modal first, then show all-orders modal
+            setOrderMergedModalVisible(false);
             playSound(mergeDone);
-            setMergeMsg("All Orders Merged!");
-            setModalVisible(true);
-            setMergeSuccess(true);
+            setAllOrdersMergedModalVisible(true);
+            updateMergeStatus(mergedOrders);
         }
     }, [mergedOrders]);
 
@@ -872,7 +875,7 @@ const Merge = () => {
                         <TouchableOpacity onPress={() => {
                             handleLogout();
                         }}>
-                            <Text style={{...styles.dangerButton, color: 'white'}}>Logout</Text>
+                            <Text style={{...styles.dangerButton, color: 'white', textAlign: 'center'}}>Logout</Text>
                         </TouchableOpacity>
                     </View>}
                     {containerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
@@ -1024,6 +1027,37 @@ const Merge = () => {
                                             handleLogout();
                                         }}>
                                         <Text style={{...styles.modalText, fontSize: 30}}>Clean</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
+                        <Modal visible={orderMergedModalVisible} transparent animationType="slide">
+                            <View style={styles.centeredView}>
+                                <View style={styles.modalView}>
+                                    <Text style={styles.modalText}>Order {orderMergedLabel} Merged</Text>
+                                    <TouchableOpacity onPress={() => setOrderMergedModalVisible(false)}>
+                                        <Text>Close</Text>
+                                    </TouchableOpacity>
+                                </View>
+                            </View>
+                        </Modal>
+
+                        {/* All orders merged modal */}
+                        <Modal visible={allOrdersMergedModalVisible} transparent animationType="slide">
+                            <View style={styles.centeredView}>
+                                <View style={styles.modalView}>
+                                    <Text style={styles.modalText}>All Orders Merged!</Text>
+                                    <TouchableOpacity 
+                                        style={styles.clearButton}
+                                        onPress={async () => {
+                                            dispatch(resetParallelState());
+                                            dispatch(clearUser());
+                                            dispatch(setUsername(''));
+                                            setAllOrdersMergedModalVisible(false);
+                                            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+                                            router.replace('/');
+                                    }}>
+                                        <Text style={styles.clearButtonText}>Close</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>

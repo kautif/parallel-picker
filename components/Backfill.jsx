@@ -1301,7 +1301,7 @@ const Backfill = ({navigation}) => {
                                     showSoftInputOnFocus={false}
                                     onChangeText={async (newVal) => {
                                         console.log("Tote onChangeText - newVal:", newVal, "requireToteAfterNotHave:", requireToteAfterNotHave);
-                                        console.log("EMPLOYEE:", user.badgeId);
+                                        console.log("EMPLOYEE:", user.employeeId);
                                         
                                         // If requireToteAfterNotHave is true, validate the containerBarcode
                                         if (requireToteAfterNotHave) {
