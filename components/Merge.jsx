@@ -590,7 +590,10 @@ const Merge = () => {
             ).map(item => ({ ...item, orderId: String(item.orderId) }));
 
             const uniqueOrderIds = [...new Set(flatItems.map(item => String(item.orderId)))];
-            setOrders(uniqueOrderIds);
+            const allOrderIds = reduxOrders.length > 0
+                ? [...new Set([...uniqueOrderIds, ...reduxOrders.map(o => String(o.orderId ?? o))])]
+                : uniqueOrderIds;
+            setOrders(allOrderIds);
 
             const grouped = flatItems.reduce((acc, item) => {
                 const existing = acc.find(obj => obj.orderId === item.orderId);
@@ -609,9 +612,9 @@ const Merge = () => {
                 .map(obj => obj.orderId);
 
             const orderIdsWithItems = new Set(flatItems.map(item => String(item.orderId)));
-            const notHaveOrders = reduxOrders
-                .map(o => String(o.orderId ?? o))
-                .filter(id => !orderIdsWithItems.has(id));
+            const notHaveOrders = reduxOrders.length > 0
+            ? reduxOrders.map(o => String(o.orderId ?? o)).filter(id => !orderIdsWithItems.has(id))
+            : [];
             const allPreMerged = [...alreadyMerged, ...notHaveOrders];
 
             if (allPreMerged.length > 0) {
