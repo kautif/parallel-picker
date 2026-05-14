@@ -6,7 +6,7 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, resetParallelState, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
+import { addBackfill, addBackfillOrderIds, addContainer, addOrder, clearBackfillOrderIds, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, resetParallelState, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
 import ParallelLogViewer from './ParallelLogViewer';
 import PrepareLogger from './PrepareLogger';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
@@ -151,12 +151,18 @@ const Prepare = ({navigation}) => {
     }
 
     const handleLogout = async () => {
-        dispatch(clearUser());  
-        dispatch(resetParallelState()); 
-        dispatch(setUsername(''));
-        setLogoutVisible(false);
+        try {
+            dispatch(resetParallelState());
+            dispatch(clearUser());  
+            dispatch(setUsername(''));
+            setLogoutVisible(false);
 
-        router.replace('/');
+            await new Promise(resolve => setTimeout(resolve, 100));
+
+            router.replace('/');
+        } catch (err) {
+            console.log(err);
+        }
     };
 
     async function getPendingBackfills () {
@@ -173,6 +179,7 @@ const Prepare = ({navigation}) => {
                 dispatch(setIsReturning(true));
                 dispatch(setPicksStarted(true));
                 const orderPayload = [...new Set(response.data.data.map(item => item.orderId))].map(id => ({ orderId: id }));
+                dispatch(clearBackfillOrderIds());
                 dispatch(addBackfillOrderIds(orderPayload));
                 console.log("=== orderPayload to be dispatched:", JSON.stringify(orderPayload));
                 console.log("backfill success");

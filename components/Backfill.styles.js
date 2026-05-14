@@ -74,6 +74,13 @@ export default StyleSheet.create({
     buttonClose: {
         backgroundColor: '#2196F3',
     },
+    dangerButton: {
+        marginTop: 15,
+        borderRadius: 10,
+        padding: 10,
+        elevation: 2,
+        backgroundColor: "#c80c0cff"
+    },
     rectButton: {
         height: 40,
         marginTop: 20,

@@ -2,12 +2,12 @@ import axios from 'axios';
 import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState, } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
-import { addVerifiedOrder, clearVerifiedOrders, removeBackfillItem } from '../app/redux/parallelSlice';
+import { addVerifiedOrder, clearVerifiedOrders, removeBackfillItem, resetParallelState } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 import BackfillLogger from './BackfillLogger';
 import ParallelLogViewer from './ParallelLogViewer';
@@ -97,15 +97,16 @@ const Backfill = ({navigation}) => {
     // Set to true synchronously in updateQty when the next item shares the current location,
     // so the atLocation effect can skip the reset before backfillItems has updated.
     const skipLocationScanRef = useRef(false);
+    const isLoggingOutRef = useRef(false);
 
     const { AudioRouter } = NativeModules;
 
     const backfillOrderIdsRef = useRef(backfillOrderIds);
     useEffect(() => {
-        if (backfillOrderIds.length > 0) {
-            const allOrderIds = [...new Set(backfillOrderIds.map(item => String(item.orderId)))];
-            setRequiredOrders(allOrderIds);
-        }
+        const allOrderIds = backfillOrderIds.length > 0
+            ? [...new Set(backfillOrderIds.map(item => String(item.orderId)))]
+            : [];
+        setRequiredOrders(allOrderIds);
     }, [backfillOrderIds]);
 
     const nextItem = require('../../WarehouseScanner/assets/sounds/next_item.mp3');
@@ -122,6 +123,7 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         // playSound(nextItem);
+        console.log("=== backfillOrderIds on mount:", JSON.stringify(backfillOrderIds));
         const setupAudio = async () => {
             try {
                 await Audio.setAudioModeAsync({
@@ -269,7 +271,7 @@ const Backfill = ({navigation}) => {
                     playSound(pickItem);
                 }, 0);
             }
-        } else if (backfillItems.length === 0 && backfillCompletedRef.current === false) {
+        } else if (backfillItems.length === 0 && backfillCompletedRef.current === false && !isLoggingOutRef.current) {
             updateBackfill();
         }
     }, [backfillItems]);
@@ -363,30 +365,18 @@ const Backfill = ({navigation}) => {
 
     const handleLogout = async () => {
         try {
-            // console.log("=== LOGOUT START ===");
-            // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
-            // console.log(`Total effect instances created: ${effectCountRef.current}`);
-            // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
-
-            if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
-                console.log("logout qty updated");
-                // await updateQty(); // ensure update completes
-            }
+            isLoggingOutRef.current = true;
+            dispatch(resetParallelState());
             dispatch(clearUser()); 
-            dispatch(resetParallelState()); 
-            orderIdRef.current = '';
             dispatch(setUsername(''));
             setLogoutVisible(false);
+            
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            router.replace('/');
         } catch (err) {
-
+            console.log(err);
         }
-        // navigation.navigate('Scan');
-        // navigation.reset({
-        //     index: 0,
-        //     routes: [{ name: 'Scan' }],
-        // });
-
-        router.replace('/');
     };
 
     const updateQty = useCallback(async () => {
@@ -926,6 +916,11 @@ const Backfill = ({navigation}) => {
                             }}
                             value={verifyOrderVal}
                         />
+                        <TouchableOpacity onPress={() => {
+                            handleLogout();
+                        }}>
+                            <Text style={{...styles.dangerButton, color: 'white'}}>Logout</Text>
+                        </TouchableOpacity>
                     </View>
                 </View>
             </Modal>

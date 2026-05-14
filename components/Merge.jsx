@@ -119,32 +119,20 @@ const Merge = () => {
             }
         }
 
-        const handleLogout = async () => {
-            try {
-                // console.log("=== LOGOUT START ===");
-                // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
-                // console.log(`Total effect instances created: ${effectCountRef.current}`);
-                // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
-    
-                if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
-                    console.log("logout qty updated");
-                    // await updateQty(); // ensure update completes
-                }
-                dispatch(clearUser());  
-                orderIdRef.current = '';
-                dispatch(setUsername(''));
-                setLogoutVisible(false);
-            } catch (err) {
-    
-            }
-            // navigation.navigate('Scan');
-            // navigation.reset({
-            //     index: 0,
-            //     routes: [{ name: 'Scan' }],
-            // });
-    
+    const handleLogout = async () => {
+        try {
+            dispatch(resetParallelState());
+            dispatch(clearUser());  
+            dispatch(setUsername(''));
+            setLogoutVisible(false);
+
+            await new Promise(resolve => setTimeout(resolve, 100));
+
             router.replace('/');
-        };
+        } catch (err) {
+            console.log(err);
+        }
+    };
 
     function handleOrderPress(i, order) {
         if (mergedOrders.includes(order)) {
@@ -881,6 +869,11 @@ const Merge = () => {
                             onChangeText={(newVal) => setOrderText(newVal)}
                             value={orderText}
                         />
+                        <TouchableOpacity onPress={() => {
+                            handleLogout();
+                        }}>
+                            <Text style={{...styles.dangerButton, color: 'white'}}>Logout</Text>
+                        </TouchableOpacity>
                     </View>}
                     {containerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
                         <Text style={styles.modalText}>Verify Container</Text>
@@ -902,6 +895,11 @@ const Merge = () => {
                             }}
                             value={containerText}
                         />
+                        <TouchableOpacity onPress={() => {
+                            handleLogout();
+                        }}>
+                            <Text style={{...styles.dangerButton, color: 'white'}}>Logout</Text>
+                        </TouchableOpacity>
                     </View>}
                     {destContainerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
                         <Text style={styles.modalText}>Scan Destination Container</Text>
@@ -1157,6 +1155,13 @@ const styles = StyleSheet.create({
         backgroundColor: 'rgb(0, 85, 165)',
         padding: 10,
         width: 150,
+    },
+    dangerButton: {
+        marginTop: 15,
+        borderRadius: 10,
+        padding: 10,
+        elevation: 2,
+        backgroundColor: "#c80c0cff"
     },
     cancelButton: {
         backgroundColor: '#ba1212'
