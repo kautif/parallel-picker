@@ -538,8 +538,10 @@ const Merge = () => {
                     );
                     if (!orderStillHasItems) {
                         setMergedOrders(prev => {
+                            console.log("prev:", prev, "currentOrderLabel:", currentOrderLabel);
+                            if (prev.includes(currentOrderLabel)) return prev;
                             const updated = [...prev, currentOrderLabel];
-                            const isLastOrder = updated.length === reduxOrders.length;
+                            const isLastOrder = updated.length === orders.length;
                             if (!isLastOrder) {
                                 setOrderMergedLabel(currentOrderLabel);
                                 setOrderMergedModalVisible(true);
@@ -548,6 +550,11 @@ const Merge = () => {
                             return updated;
                         });
                         setCurrentOrder(null);
+                        if (mergedOrders.includes(currentOrderLabel)) {
+                            console.log("calling updateMergeStatus with:", mergedOrders);
+                            userHasCompletedOrder.current = true;
+                            updateMergeStatus([...mergedOrders]);
+                        }
                     } else {
                         setModalVisible(false);
                     }
@@ -705,6 +712,7 @@ const Merge = () => {
             containerBarcode: item.containerBarcode
         })) : [];
 
+        console.log("mergedOrders useEffect fired:", mergedOrders.length, reduxOrders.length, userHasCompletedOrder.current, mergeCompletedRef.current);
         setMergeArr(built);
     }, [ordersArr]);
 
@@ -720,7 +728,7 @@ const Merge = () => {
 
     useEffect(() => {
         if (!userHasCompletedOrder.current) return;
-        if (reduxOrders.length > 0 && mergedOrders.length === reduxOrders.length) {
+        if (orders.length > 0 && mergedOrders.length === orders.length) {
             if (mergeCompletedRef.current) return;
             mergeCompletedRef.current = true;
             // Close single-order modal first, then show all-orders modal
