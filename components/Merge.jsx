@@ -362,7 +362,7 @@ const Merge = () => {
                 });
                 playSound(mergeDone);
                 setMergeMsg("All Orders Merged!");
-                setModalVisible(true);
+                setAllOrdersMergedModalVisible(true);
                 setMergeSuccess(true);
                 return true
             } else {
@@ -537,11 +537,17 @@ const Merge = () => {
                         i => parseInt(i.orderId) === currentOrderId && i.mergedQty < i.scannedQty
                     );
                     if (!orderStillHasItems) {
-                        setMergedOrders(prev => [...prev, currentOrderLabel]);
+                        setMergedOrders(prev => {
+                            const updated = [...prev, currentOrderLabel];
+                            const isLastOrder = updated.length === reduxOrders.length;
+                            if (!isLastOrder) {
+                                setOrderMergedLabel(currentOrderLabel);
+                                setOrderMergedModalVisible(true);
+                            }
+                            userHasCompletedOrder.current = true;
+                            return updated;
+                        });
                         setCurrentOrder(null);
-                        setOrderMergedLabel(currentOrderLabel);
-                        userHasCompletedOrder.current = true;
-                        setOrderMergedModalVisible(true); // always show, even for last order
                     } else {
                         setModalVisible(false);
                     }
@@ -719,8 +725,8 @@ const Merge = () => {
             mergeCompletedRef.current = true;
             // Close single-order modal first, then show all-orders modal
             setOrderMergedModalVisible(false);
-            playSound(mergeDone);
-            setAllOrdersMergedModalVisible(true);
+            // playSound(mergeDone);
+            // setAllOrdersMergedModalVisible(true);
             updateMergeStatus(mergedOrders);
         }
     }, [mergedOrders]);
@@ -839,18 +845,6 @@ const Merge = () => {
                                 setModalVisible(false);
                                 await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
                                 router.replace('/');
-                                } else if (mergeMsg === "All Orders Merged!") {
-                                    const success = await updateMergeStatus(mergedOrders);
-                                    if (!success) return;
-                                    dispatch(resetParallelState());
-                                    dispatch(clearUser());
-                                    dispatch(setUsername(''));
-                                    setMergeMsg("");
-                                    setModalVisible(false);
-                                    setErrorMsg("");
-                                    setErrorVisible(false);
-                                    await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
-                                    router.replace('/');
                                 } else {
                                     setMergeMsg("");
                                     setModalVisible(false);
@@ -901,7 +895,7 @@ const Merge = () => {
                         <TouchableOpacity onPress={() => {
                             handleLogout();
                         }}>
-                            <Text style={{...styles.dangerButton, color: 'white'}}>Logout</Text>
+                            <Text style={{...styles.dangerButton, color: 'white', textAlign: 'center'}}>Logout</Text>
                         </TouchableOpacity>
                     </View>}
                     {destContainerVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
