@@ -6,9 +6,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
-import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
+import { addBackfill, addBackfillOrderIds, addContainer, addOrder, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, resetParallelState, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
 import ParallelLogViewer from './ParallelLogViewer';
 import PrepareLogger from './PrepareLogger';
+import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 
 // Version 0.1
 // 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
@@ -150,28 +151,10 @@ const Prepare = ({navigation}) => {
     }
 
     const handleLogout = async () => {
-        try {
-            // console.log("=== LOGOUT START ===");
-            // console.log("LOGOUT - resetting orderIdRef from", orderIdRef.current, "to empty string");
-            // console.log(`Total effect instances created: ${effectCountRef.current}`);
-            // console.log(`Total sendOrderId calls: ${sendOrderIdCallCount.current}`);
-
-            if (order.length > 0 && totalItemsScanned > 0 && scannedQty > 0) {
-                console.log("logout qty updated");
-                // await updateQty(); // ensure update completes
-            }
-            dispatch(clearUser());  
-            orderIdRef.current = '';
-            dispatch(setUsername(''));
-            setLogoutVisible(false);
-        } catch (err) {
-
-        }
-        // navigation.navigate('Scan');
-        // navigation.reset({
-        //     index: 0,
-        //     routes: [{ name: 'Scan' }],
-        // });
+        dispatch(clearUser());  
+        dispatch(resetParallelState()); 
+        dispatch(setUsername(''));
+        setLogoutVisible(false);
 
         router.replace('/');
     };
