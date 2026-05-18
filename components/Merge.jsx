@@ -864,7 +864,7 @@ const Merge = () => {
                                 }
                             }}
                         >
-                            <Text style={{color: 'white', fontSize: 20}}>Close</Text>
+                            <Text style={styles.clearButtonText}>Close</Text>
                         </TouchableOpacity>
                     </View>}
                     {orderVisible && <View style={{backgroundColor: 'white', padding: 20, borderRadius: 10, borderWidth: 2}}>
@@ -1040,8 +1040,8 @@ const Merge = () => {
                             <View style={styles.centeredView}>
                                 <View style={styles.modalView}>
                                     <Text style={styles.modalText}>Order {orderMergedLabel} Merged</Text>
-                                    <TouchableOpacity onPress={() => setOrderMergedModalVisible(false)}>
-                                        <Text>Close</Text>
+                                    <TouchableOpacity style={styles.clearButton} onPress={() => setOrderMergedModalVisible(false)}>
+                                        <Text style={styles.clearButtonText}>Close</Text>
                                     </TouchableOpacity>
                                 </View>
                             </View>
