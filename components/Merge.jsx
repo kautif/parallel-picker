@@ -62,6 +62,7 @@ const Merge = () => {
     const pendingMergeItem = useRef(null);
     const userHasCompletedOrder = useRef(false);
     const [allNotHave, setAllNotHave] = useState(false);
+    const [partialMergeModalVisible, setPartialMergeModalVisible] = useState(false);
 
     // Plain array instead of Set — reliable React re-renders
     const [mergedOrders, setMergedOrders] = useState([]);
@@ -503,11 +504,10 @@ const Merge = () => {
             return;
         }
 
+        const currentItem = mergeArr[matchIndex];
         // Upsert into containerItems: increment qty if barcode already exists, else add new entry
-        const existingContainerIndex = item.containerItems.findIndex(
-            c => c.containerBarcode === scanned
-        );
-        const updatedContainerItems = [...item.containerItems];
+        const existingContainerIndex = currentItem.containerItems.findIndex(c => c.containerBarcode === scanned);
+        const updatedContainerItems = [...currentItem.containerItems];
         if (existingContainerIndex !== -1) {
             updatedContainerItems[existingContainerIndex] = {
                 ...updatedContainerItems[existingContainerIndex],
@@ -518,9 +518,9 @@ const Merge = () => {
         }
 
         // Write the updated containerItems back onto the item in mergeArr
-        const updatedItem = { ...item, containerItems: updatedContainerItems };
-        const updatedArr = [...updated];
-        updatedArr[matchIndex] = updatedItem;
+        const updatedItem = { ...updated[matchIndex], containerItems: updatedContainerItems };
+        const updatedArr = mergeArr.map((i, idx) => idx === matchIndex ? updatedItem : i);
+        // updatedArr[matchIndex] = updatedItem;
 
         setMergeArr(updatedArr);
 
@@ -634,55 +634,6 @@ const Merge = () => {
         console.log("orders: ", orders);
     }, [orders])
 
-    // useEffect(() => {
-    //     if (backfillsArranged.length > 0) {
-    //         const uniqueOrderIds = backfillsArranged.map(obj => obj.orderId);
-    //         setOrders(uniqueOrderIds);
-    //         setOrdersArr(backfillsArranged); // already in { orderId, order[] } shape
-    //     }
-    // }, [backfillsArranged])
-
-    // useEffect(() => {
-    //     if (!initialBackfill.length || mergedBackfills.length) return;
-    //     console.log("merge initialBackfill");
-    //     const built = orders.length > 0 ? orders.map(orderId => {
-    //         const order = initialBackfill.filter(
-    //             item => parseInt(item.orderId) === parseInt(orderId)
-    //         );
-    //         const totalQty = order.reduce((sum, item) => sum + item.scannedQty, 0);
-    //         return { orderId, order, totalQty };
-    //     }) : [];
-
-    //     setOrdersArr(built);
-    //     mergeArrBuilt.current = false;
-    // }, [initialBackfill]);
-
-    // useEffect(() => {
-    //     if (ordersArr.length === 0 || mergeArrBuilt.current) return;
-
-    //     mergeArrBuilt.current = true;
-
-    //     const built = backfillsArranged.length > 0 ? backfillsArranged.map(item => ({
-    //         orderId: item.orderId,
-    //         orderBackFillItemsId: item.orderBackFillItemsId,
-    //         description: item.description,
-    //         possibleScans: [
-    //             item.itemLookupCode,
-    //             ...(item.upcAliasList ?? []).map(alias => alias.upc)
-    //         ],
-    //         upcList: (item.upcList ?? []).map(u => ({
-    //             upc: u.upc,
-    //             multiplier: u.sellingUnitMultiplier
-    //         })),
-    //         scannedQty: item.scannedQty,
-    //         mergedQty: 0,
-    //         pickLocation: item.pickLocation,
-    //         containerBarcode: item.containerBarcode
-    //     })) : [];
-
-    //     setMergeArr(built);
-    // }, [ordersArr]);
-
     useEffect(() => {
         console.log("OrdersArr: ", ordersArr[0]);
         if (ordersArr.length === 0 || mergeArrBuilt.current) return;
@@ -778,7 +729,7 @@ const Merge = () => {
             const increment = upcListMatch ? upcListMatch.multiplier : 1;
 
             if (matched.mergedQty + increment > matched.scannedQty) {
-                setErrorMsg(`Cannot exceed expected quantity of ${matched.scannedQty}`);
+                setErrorMsg(`${matched.description} \n Cannot exceed expected quantity of ${matched.scannedQty}`);
                 setModalVisible(true);
                 setScanText("");
                 return prev;
@@ -1047,6 +998,66 @@ const Merge = () => {
                             </View>
                         </Modal>
 
+                        {/* Partial Merge confirmation modal */}
+                        <Modal visible={partialMergeModalVisible} transparent animationType="slide">
+                            <View style={styles.centeredView}>
+                                <View style={styles.modalView}>
+                                    <Text style={styles.modalText}>The following have not been fully scanned:</Text>
+                                    {currentOrder !== null && mergeArr
+                                        .filter(item =>
+                                            parseInt(item.orderId) === parseInt(ordersArr[currentOrder]?.orderId) &&
+                                            item.mergedQty < item.scannedQty
+                                        )
+                                        .map(item => (
+                                            <Text key={item.orderBackFillItemsId} style={styles.modalText}>
+                                                {item.description}
+                                            </Text>
+                                        ))
+                                    }
+                                    <Text style={styles.modalText}>Are you sure you want to merge?</Text>
+                                    <View style={{ flexDirection: 'row', justifyContent: 'space-evenly', width: '100%', marginTop: 10 }}>
+                                        <TouchableOpacity
+                                            style={styles.clearButton}
+                                            onPress={async () => {
+                                                setPartialMergeModalVisible(false);
+                                                const currentOrderId = parseInt(ordersArr[currentOrder]?.orderId);
+                                                const currentOrderLabel = ordersArr[currentOrder]?.orderId;
+                                                const itemsForOrder = mergeArr.filter(
+                                                    item => parseInt(item.orderId) === currentOrderId
+                                                );
+                                                // Only call updateMergedItem for items that have at least one unit scanned
+                                                const itemsToUpdate = itemsForOrder.filter(item => item.mergedQty === item.scannedQty);
+                                                for (const item of itemsToUpdate) {
+                                                    const success = await updateMergedItem(item, item.containerItems);
+                                                    if (!success) return;
+                                                }
+                                                setMergedOrders(prev => {
+                                                    if (prev.includes(currentOrderLabel)) return prev;
+                                                    const updated = [...prev, currentOrderLabel];
+                                                    const isLastOrder = updated.length === orders.length;
+                                                    if (!isLastOrder) {
+                                                        setOrderMergedLabel(currentOrderLabel);
+                                                        setOrderMergedModalVisible(true);
+                                                    }
+                                                    userHasCompletedOrder.current = true;
+                                                    return updated;
+                                                });
+                                                setCurrentOrder(null);
+                                            }}
+                                        >
+                                            <Text style={styles.clearButtonText}>Yes</Text>
+                                        </TouchableOpacity>
+                                        <TouchableOpacity
+                                            style={{ ...styles.clearButton, backgroundColor: '#ba1212' }}
+                                            onPress={() => setPartialMergeModalVisible(false)}
+                                        >
+                                            <Text style={styles.clearButtonText}>Cancel</Text>
+                                        </TouchableOpacity>
+                                    </View>
+                                </View>
+                            </View>
+                        </Modal>
+
                         {/* All orders merged modal */}
                         <Modal visible={allOrdersMergedModalVisible} transparent animationType="slide">
                             <View style={styles.centeredView}>
@@ -1097,6 +1108,12 @@ const Merge = () => {
                     onPress={() => setScanText("")}
                 >
                     <Text style={styles.clearButtonText}>Clear</Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                    style={styles.clearButton}
+                    onPress={() => setPartialMergeModalVisible(true)}
+                >
+                    <Text style={styles.clearButtonText}>Partial Merge</Text>
                 </TouchableOpacity>
                 {/* <TouchableOpacity
                     style={{...styles.clearButton, ...styles.cancelButton}}

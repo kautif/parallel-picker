@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import React, { useCallback, useEffect, useRef, useState, } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -73,7 +73,11 @@ const Backfill = ({navigation}) => {
     const dispatch = useDispatch();
     const orders = useSelector(state => state.parallel.orders);
     const verifiedOrders = useSelector(state => state.parallel.verifiedOrders);
-    const backfillItems = useSelector(state => state.parallel.backfillItems);
+    const rawBackfillItems = useSelector(state => state.parallel.backfillItems);
+    const backfillItems = useMemo(
+        () => rawBackfillItems.filter(item => item.pickCompleted === false),
+        [rawBackfillItems]
+    );
     const backfillOrderIds = useSelector(state => state.parallel.backfillOrderIds);
     const backfillsArranged = useSelector(state => state.parallel.backfillsArranged);
     const backfillCompletedRedux = useSelector(state => state.parallel.backfillCompleted);
