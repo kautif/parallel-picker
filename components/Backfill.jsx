@@ -2,7 +2,7 @@ import axios from 'axios';
 import { Audio } from 'expo-av';
 import { router } from 'expo-router';
 import * as ScreenOrientation from 'expo-screen-orientation';
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState, } from 'react';
 import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
@@ -73,7 +73,11 @@ const Backfill = ({navigation}) => {
     const dispatch = useDispatch();
     const orders = useSelector(state => state.parallel.orders);
     const verifiedOrders = useSelector(state => state.parallel.verifiedOrders);
-    const backfillItems = useSelector(state => state.parallel.backfillItems);
+    const rawBackfillItems = useSelector(state => state.parallel.backfillItems);
+    const backfillItems = useMemo(
+        () => rawBackfillItems.filter(item => item.pickCompleted === false),
+        [rawBackfillItems]
+    );
     const backfillOrderIds = useSelector(state => state.parallel.backfillOrderIds);
     const backfillsArranged = useSelector(state => state.parallel.backfillsArranged);
     const backfillCompletedRedux = useSelector(state => state.parallel.backfillCompleted);
@@ -123,7 +127,7 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         // playSound(nextItem);
-        console.log("=== backfillOrderIds on mount:", JSON.stringify(backfillOrderIds));
+        console.log("rawBackfill", rawBackfillItems);
         const setupAudio = async () => {
             try {
                 await Audio.setAudioModeAsync({
@@ -393,13 +397,14 @@ const Backfill = ({navigation}) => {
         console.log("order id: ", backfillItems[0].orderId);
         console.log("item id: ", backfillItems[0].orderBackFillItemsId);
         console.log("pickLocations: ", pickedLocationsRef.current);
+        console.log("pickLocation: ", scannedLoc);
         try {
             setLastLocation(pickedLocationsRef.current);
             const response = await axios.post('http://192.168.2.165/api/Order/updateBackFillDetails', {
                 token: 'Yh2k7QSu4l8CZg5p6X3Pna9L0Miy4D3Bvt0JVr87UcOj69Kqw5R2Nmf4FWs03Hdx',
                 employeeId: user.employeeID,
                 orderBackFillItemsId: backfillItems[0].orderBackFillItemsId,
-                pickLocations: pickedLocationsRef.current,
+                pickLocations: pickedLocationsRef.current
             });
 
             if (!response.data.success) {
@@ -453,7 +458,7 @@ const Backfill = ({navigation}) => {
                 }
 
                 pickedLocationsRef.current = [];
-                dispatch(removeBackfillItem());
+                dispatch(removeBackfillItem(backfillItems[0].orderBackFillItemsId));
 
                 // ONLY reset these if we aren't staying at the same location
                 if (!isSkipping) {
@@ -757,7 +762,7 @@ const Backfill = ({navigation}) => {
                                             if (addedAtThisLoc === 0) {
                                                 // Nothing was scanned at this location — skip container scan and finalize directly.
                                                 console.log("Not Have at alternate with 0 qty — skipping container scan, calling updateQty");
-                                                updateQty();
+                                                updateQty(scannedLoc);
                                             } else {
                                                 // Set flag to require tote/containerBarcode scan before finalizing.
                                                 // Stay on the at-location screen so the tote input handles the scan.
@@ -780,7 +785,7 @@ const Backfill = ({navigation}) => {
                             <TouchableOpacity 
                                 style={{...styles.rectButton, justifyContent: 'center', marginStart: 40}}
                                 onPress={() => {
-                                    dispatch(removeBackfillItem());
+                                    dispatch(removeBackfillItem(backfillItems[0].orderBackFillItemsId));
                                     setNotHaveVisible(false);
                                 }}>
                                 <Text style={{textAlign: 'center'}}>No</Text>

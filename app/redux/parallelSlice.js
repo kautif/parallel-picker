@@ -47,7 +47,9 @@ const parallelSlice = createSlice({
             state.backfillItems = action.payload;
         },
         removeBackfillItem: (state, action) => {
-            state.backfillItems = state.backfillItems.slice(1);
+            state.backfillItems = state.backfillItems.filter(
+                item => item.orderBackFillItemsId !== action.payload
+            );
         },
         addArrangedBackfillObj: (state, action) => {
             state.backfillsArranged.push(action.payload);

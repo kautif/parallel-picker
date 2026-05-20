@@ -7,9 +7,9 @@ import { Image, Modal, NativeModules, Platform, StyleSheet, Text, TextInput, Tou
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { addBackfill, addBackfillOrderIds, addContainer, addOrder, clearBackfillOrderIds, populateBackfill, queueBackfill, removeBackfillOrder, removeContainer, removeOrder, resetParallelState, setIsReturning, setPicksStarted } from '../../../redux/parallelSlice';
+import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 import ParallelLogViewer from './ParallelLogViewer';
 import PrepareLogger from './PrepareLogger';
-import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
 
 // Version 0.1
 // 3/12/26: The purpose that addBackfill serves on line 74 isn't necessary. Remove it. Also, add a dispatch action/function to retain the original order to reference later
@@ -114,7 +114,7 @@ const Prepare = ({navigation}) => {
                 // dispatch(queueBackfill(response.data.data));
                 let pruneBackfill = [];
                 for (let i = 0; i < response.data.data.length; i++) {
-                    if (response.data.data[i].scannedQty < response.data.data[i].orderedQty) {
+                    if (response.data.data[i].pickCompleted === false) {
                         pruneBackfill.push(response.data.data[i]);
                     }
                 }
@@ -176,8 +176,11 @@ const Prepare = ({navigation}) => {
             console.log("backfill success: ", response.data.success);
             if (response.data.success && response.data.data && response.data.data.length > 0) {
                 console.log("=== response.data.data:", JSON.stringify(response.data.data));
-                dispatch(setIsReturning(true));
-                dispatch(setPicksStarted(true));
+                const hasStarted = response.data.data.some(item => item.pickCompleted === true || item.scannedQty > 0);
+                if (hasStarted) {
+                    dispatch(setIsReturning(true));
+                    dispatch(setPicksStarted(true));
+                }
                 const orderPayload = [...new Set(response.data.data.map(item => item.orderId))].map(id => ({ orderId: id }));
                 dispatch(clearBackfillOrderIds());
                 dispatch(addBackfillOrderIds(orderPayload));
@@ -188,7 +191,7 @@ const Prepare = ({navigation}) => {
                 // dispatch(queueBackfill(response.data.data));
                 let pruneBackfill = [];
                 for (let i = 0; i < response.data.data.length; i++) {
-                    if (response.data.data[i].scannedQty < response.data.data[i].orderedQty) {
+                    if (response.data.data[i].pickCompleted === false) {
                         pruneBackfill.push(response.data.data[i]);
                     }
 
