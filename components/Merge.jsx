@@ -148,7 +148,6 @@ const Merge = () => {
         setOrderText("");
         setContainerText("");
         setOrderVisible(true);
-        setModalVisible(true);
     }
 
     // async function getBackFillDetails() {
@@ -544,6 +543,7 @@ const Merge = () => {
                             const isLastOrder = updated.length === orders.length;
                             if (!isLastOrder) {
                                 setOrderMergedLabel(currentOrderLabel);
+                                setModalVisible(false);
                                 setOrderMergedModalVisible(true);
                             }
                             userHasCompletedOrder.current = true;
@@ -750,7 +750,6 @@ const Merge = () => {
             setDestContainerText("");
             setDestContainerError("");
             setDestContainerVisible(true);
-            setModalVisible(true);
 
             return updated;
         });

@@ -52,6 +52,7 @@ export default StyleSheet.create({
         backgroundColor: 'white',
         borderRadius: 20,
         padding: 35,
+        paddingBottom: 50,
         alignItems: 'center',
         shadowColor: '#000',
         shadowOffset: {
@@ -97,7 +98,7 @@ export default StyleSheet.create({
         textAlign: 'center',
     },
     clearButton: {
-    marginTop: 20,
+    marginTop: 5,
     backgroundColor: 'rgb(0, 85, 165)',
     padding: 10,
     width: 110,

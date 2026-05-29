@@ -7,7 +7,7 @@ import { Image, Modal, NativeModules, Platform, Text, TextInput, ToastAndroid, T
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearUser, setUsername } from '../../WarehouseScanner/app/redux/userSlice';
-import { addVerifiedOrder, clearVerifiedOrders, removeBackfillItem, resetParallelState } from '../app/redux/parallelSlice';
+import { addVerifiedOrder, clearVerifiedOrders, moveBackfillItemToEnd, removeBackfillItem, resetParallelState } from '../app/redux/parallelSlice';
 import styles from './Backfill.styles';
 import BackfillLogger from './BackfillLogger';
 import ParallelLogViewer from './ParallelLogViewer';
@@ -65,6 +65,7 @@ const Backfill = ({navigation}) => {
     const [itemDescriptionVisible, setItemDescriptionVisible] = useState(false);
     const [modalVisible, setModalVisible] = useState(false);
     const [notHaveVisible, setNotHaveVisible] = useState(false);
+    const [notHaveFromLocVisible, setNotHaveFromLocVisible] = useState(false);
     const [bfModalVisible, setBfModalVisible] = useState(false);
     const [showKeyboard, setShowKeyboard] = useState(false);
     const [logoutVisible, setLogoutVisible] = useState(false);
@@ -607,6 +608,24 @@ const Backfill = ({navigation}) => {
         }
     }
 
+    const handleReturnLater = (closeModal) => {
+        if (backfillItems.length === 0) return;
+        // Reset all in-progress state so the item starts fresh when it comes back around
+        dispatch(moveBackfillItemToEnd(backfillItems[0].orderBackFillItemsId));
+        setScannedQty(0);
+        setScannedLoc("");
+        setAtLocation(false);
+        setAlternateLocRequired(false);
+        setFirstScannedLoc("");
+        setRequireToteAfterNotHave(false);
+        setAwaitingToteOnlyRemoval(false);
+        setUnavailableAllLocations(false);
+        setTote("");
+        pickedLocationsRef.current = [];
+        lastVerifiedLocRef.current = '';
+        closeModal(false);
+    };
+
     return (
         <SafeAreaView>
             <Modal
@@ -729,114 +748,173 @@ const Backfill = ({navigation}) => {
                 <View style={styles.centeredView}>
                     <View style={{...styles.modalView, width: 500}}>
                         <Text style={styles.modalText}>Are you sure the item isn't available?</Text>
-                        <View style={{flexDirection: 'row', justifyContent: 'space-around'}}>
-                            <TouchableOpacity 
-                                style={{...styles.rectButton, justifyContent: 'center'}}
-                                onPress={() => {
-                                    if (backfillItems.length > 0 && (scannedQty !== backfillItems[0].orderedQty)) {
-                                        const item = backfillItems[0];
-                                        const hasBothLocations = item.location && item.location.length > 0
-                                            && item.binLocation && item.binLocation.length > 0;
+                        <View style={{flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 10}}>
+                            {/* Left column: Yes and No */}
+                            <View style={{flexDirection: 'column', alignItems: 'center', gap: 10}}>
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => {
+                                        if (backfillItems.length > 0 && (scannedQty !== backfillItems[0].orderedQty)) {
+                                            const item = backfillItems[0];
+                                            const hasBothLocations = item.location && item.location.length > 0
+                                                && item.binLocation && item.binLocation.length > 0;
 
-                                        if (hasBothLocations && !alternateLocRequired) {
-                                            // First Not Have on a two-location item — store this location's
-                                            // entry locally and send the user to the alternate location.
-                                            // No API call yet.
-                                            storeFirstLocationAndAdvance({
-                                                qty: scannedQty,
-                                                loc: scannedLoc,
-                                                isSingleLocation: false
-                                            });
-                                        } else {
-                                            // Second Not Have (alternate location exhausted) OR
-                                            // single-location item — require container barcode scan before updateQty,
-                                            // UNLESS nothing was scanned at this location (nothing went into the tote).
-                                            const prevQty = pickedLocationsRef.current[0]?.qty ?? 0;
-                                            const addedAtThisLoc = scannedQty - prevQty;
-
-                                            pickedLocationsRef.current = [
-                                                ...pickedLocationsRef.current,
-                                                { pickLocation: scannedLoc, qty: addedAtThisLoc }
-                                            ];
-
-                                            if (addedAtThisLoc === 0) {
-                                                // Nothing was scanned at this location — skip container scan and finalize directly.
-                                                console.log("Not Have at alternate with 0 qty — skipping container scan, calling updateQty");
-                                                updateQty(scannedLoc);
+                                            if (hasBothLocations && !alternateLocRequired) {
+                                                storeFirstLocationAndAdvance({
+                                                    qty: scannedQty,
+                                                    loc: scannedLoc,
+                                                    isSingleLocation: false
+                                                });
                                             } else {
-                                                // Set flag to require tote/containerBarcode scan before finalizing.
-                                                // Stay on the at-location screen so the tote input handles the scan.
-                                                setRequireToteAfterNotHave(true);
-                                                setTote("");
-                                                setTimeout(() => {
-                                                    toteRef.current?.focus();
-                                                    playSound(scanContainerSound);
-                                                }, 500);
+                                                const prevQty = pickedLocationsRef.current[0]?.qty ?? 0;
+                                                const addedAtThisLoc = scannedQty - prevQty;
+                                                pickedLocationsRef.current = [
+                                                    ...pickedLocationsRef.current,
+                                                    { pickLocation: scannedLoc, qty: addedAtThisLoc }
+                                                ];
+                                                if (addedAtThisLoc === 0) {
+                                                    updateQty(scannedLoc);
+                                                } else {
+                                                    setRequireToteAfterNotHave(true);
+                                                    setTote("");
+                                                    setTimeout(() => {
+                                                        toteRef.current?.focus();
+                                                        playSound(scanContainerSound);
+                                                    }, 500);
+                                                }
                                             }
                                         }
-                                    }
-                                    setNotHaveVisible(false);
-                                }}
-                                >
-                                <Text
-                                    style={{textAlign: 'center'}}
-                                >Yes</Text>
-                            </TouchableOpacity>
-                            <TouchableOpacity 
-                                style={{...styles.rectButton, justifyContent: 'center', marginStart: 40}}
-                                onPress={() => {
-                                    dispatch(removeBackfillItem(backfillItems[0].orderBackFillItemsId));
-                                    setNotHaveVisible(false);
-                                }}>
-                                <Text style={{textAlign: 'center'}}>No</Text>
-                            </TouchableOpacity>
-                            {/*
-                                Third option: "Unavailable All Locations".
-                                Only shown at the FIRST location of a two-location item
-                                (i.e. before the user has Not Have'd once and been sent to the alternate).
-                                For single-location items, the existing Yes already means
-                                "unavailable everywhere", so the button adds nothing there.
-                            */}
-                            {(() => {
-                                if (backfillItems.length === 0) return null;
-                                if (alternateLocRequired) return null; // already at alternate — hide
-                                const item = backfillItems[0];
-                                const hasBothLocations = item.location && item.location.length > 0
-                                    && item.binLocation && item.binLocation.length > 0;
-                                if (!hasBothLocations) return null; // single-location item — hide
+                                        setNotHaveVisible(false);
+                                    }}>
+                                    <Text style={{textAlign: 'center'}}>Alternate Location</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => {
+                                        dispatch(removeBackfillItem(backfillItems[0].orderBackFillItemsId));
+                                        setNotHaveVisible(false);
+                                    }}>
+                                    <Text style={{textAlign: 'center'}}>Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                            {/* Right column: No Locations Available and Return Later */}
+                            <View style={{flexDirection: 'column', alignItems: 'center', gap: 10}}>
+                                {(() => {
+                                    if (backfillItems.length === 0) return null;
+                                    if (alternateLocRequired) return null;
+                                    const item = backfillItems[0];
+                                    const hasBothLocations = item.location && item.location.length > 0
+                                        && item.binLocation && item.binLocation.length > 0;
+                                    if (!hasBothLocations) return null;
 
-                                return (
-                                    <TouchableOpacity
-                                        style={{...styles.rectButton, justifyContent: 'center', marginStart: 40}}
-                                        onPress={() => {
-                                            // User is telling us the item isn't available at EITHER location.
-                                            // Do NOT send them to the alternate. Finalize this item now.
-                                            // Record only what (if anything) was scanned at this location.
-                                            pickedLocationsRef.current = [
-                                                { pickLocation: scannedLoc, qty: scannedQty }
-                                            ];
-                                            setUnavailableAllLocations(true);
+                                    return (
+                                        <TouchableOpacity
+                                            style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                            onPress={() => {
+                                                pickedLocationsRef.current = [
+                                                    { pickLocation: scannedLoc, qty: scannedQty }
+                                                ];
+                                                setUnavailableAllLocations(true);
+                                                if (scannedQty > 0) {
+                                                    setRequireToteAfterNotHave(true);
+                                                    setTote("");
+                                                    setTimeout(() => {
+                                                        toteRef.current?.focus();
+                                                        playSound(scanContainerSound);
+                                                    }, 500);
+                                                } else {
+                                                    updateQty();
+                                                }
+                                                setNotHaveVisible(false);
+                                            }}>
+                                            <Text style={{textAlign: 'center'}}>Out of Stock</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })()}
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => handleReturnLater(setNotHaveVisible)}>
+                                    <Text style={{textAlign: 'center'}}>Return Later</Text>
+                                </TouchableOpacity>
+                            </View>
+                        </View>
+                    </View>
+                </View>
+            </Modal>
+            <Modal
+                animationType="slide"
+                transparent={true}
+                visible={notHaveFromLocVisible}>
+                <View style={styles.centeredView}>
+                    <View style={{...styles.modalView, width: 500}}>
+                        <Text style={styles.modalText}>Are you sure the item isn't available?</Text>
+                        <View style={{flexDirection: 'row', justifyContent: 'space-around', width: '100%', marginTop: 10}}>
+                            {/* Left column: Yes and No */}
+                            <View style={{flexDirection: 'column', alignItems: 'center', gap: 10}}>
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => {
+                                        if (backfillItems.length > 0) {
+                                            const item = backfillItems[0];
+                                            const hasBothLocations = item.location && item.location.length > 0
+                                                && item.binLocation && item.binLocation.length > 0;
 
-                                            if (scannedQty > 0) {
-                                                // Qty was scanned — require containerBarcode scan before updateQty.
-                                                // The tote useEffect will fire updateQty once the correct tote is scanned.
-                                                setRequireToteAfterNotHave(true);
-                                                setTote("");
-                                                setTimeout(() => {
-                                                    toteRef.current?.focus();
-                                                    playSound(scanContainerSound);
-                                                }, 500);
+                                            if (hasBothLocations && !alternateLocRequired) {
+                                                storeFirstLocationAndAdvance({
+                                                    qty: 0,
+                                                    loc: "",
+                                                    isSingleLocation: false
+                                                });
                                             } else {
-                                                // Nothing scanned — no tote needed. Finalize directly with a zero-qty entry.
+                                                pickedLocationsRef.current = [
+                                                    ...pickedLocationsRef.current,
+                                                    { pickLocation: "", qty: 0 }
+                                                ];
                                                 updateQty();
                                             }
+                                        }
+                                        setNotHaveFromLocVisible(false);
+                                    }}>
+                                    <Text style={{textAlign: 'center'}}>Alternate Location</Text>
+                                </TouchableOpacity>
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => {
+                                        dispatch(removeBackfillItem(backfillItems[0].orderBackFillItemsId));
+                                        setNotHaveFromLocVisible(false);
+                                    }}>
+                                    <Text style={{textAlign: 'center'}}>Cancel</Text>
+                                </TouchableOpacity>
+                            </View>
+                            {/* Right column: No Locations Available and Return Later */}
+                            <View style={{flexDirection: 'column', alignItems: 'center', gap: 10}}>
+                                {(() => {
+                                    if (backfillItems.length === 0) return null;
+                                    if (alternateLocRequired) return null;
+                                    const item = backfillItems[0];
+                                    const hasBothLocations = item.location && item.location.length > 0
+                                        && item.binLocation && item.binLocation.length > 0;
+                                    if (!hasBothLocations) return null;
 
-                                            setNotHaveVisible(false);
-                                        }}>
-                                        <Text style={{textAlign: 'center'}}>No Locations Available</Text>
-                                    </TouchableOpacity>
-                                );
-                            })()}
+                                    return (
+                                        <TouchableOpacity
+                                            style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                            onPress={() => {
+                                                pickedLocationsRef.current = [{ pickLocation: "", qty: 0 }];
+                                                setUnavailableAllLocations(true);
+                                                updateQty();
+                                                setNotHaveFromLocVisible(false);
+                                            }}>
+                                            <Text style={{textAlign: 'center'}}>Out of Stock</Text>
+                                        </TouchableOpacity>
+                                    );
+                                })()}
+                                <TouchableOpacity
+                                    style={{...styles.rectButton, justifyContent: 'center', marginTop: 0, width: 140}}
+                                    onPress={() => handleReturnLater(setNotHaveFromLocVisible)}>
+                                    <Text style={{textAlign: 'center'}}>Return Later</Text>
+                                </TouchableOpacity>
+                            </View>
                         </View>
                     </View>
                 </View>
@@ -1058,9 +1136,16 @@ const Backfill = ({navigation}) => {
                         <Text style={{...styles.heading, marginTop: 10, fontWeight: 'bold', marginLeft: 60}}>
                             {awaitingToteOnlyRemoval ? 'Scan Tote' : (requireToteAfterNotHave ? 'Scan Container' : 'Scan Location')}
                         </Text>
-                        <View style={{flexDirection: 'row', width: 400, marginHorizontal: 'auto'}}>
+                        <View style={{flexDirection: 'row', marginHorizontal: 'auto', alignItems: 'center', gap: 8}}>
+                            {!awaitingToteOnlyRemoval && !requireToteAfterNotHave && orderedLocs.filter(l => l && l.length > 0).length > 0 && (
+                                <TouchableOpacity
+                                    style={{...styles.clearButton, backgroundColor: "rgb(0, 85, 165)", height: 50, justifyContent: 'center'}}
+                                    onPress={() => setNotHaveFromLocVisible(true)}>
+                                    <Text style={{...styles.clearButtonText, color: 'white'}}>Not Have</Text>
+                                </TouchableOpacity>
+                            )}
                             <TouchableOpacity
-                                style={styles.clearButton}
+                                style={{...styles.clearButton, height: 50, justifyContent: 'center'}}
                                 onPress={() => {
                                     setScannedLoc("");
                                 }}>
@@ -1069,7 +1154,7 @@ const Backfill = ({navigation}) => {
                             {awaitingToteOnlyRemoval || requireToteAfterNotHave ? (
                                 // Require containerBarcode scan (after first Not Have) or tote scan (single-location)
                                 <TextInput
-                                    style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1}}
+                                    style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1, height: 50}}
                                     autoFocus={true}
                                     showSoftInputOnFocus={false}
                                     onChangeText={(newVal) => {
@@ -1122,9 +1207,19 @@ const Backfill = ({navigation}) => {
                                     autoCapitalize='characters'
                                     value={tote}
                                 />
+                            ) : orderedLocs.filter(l => l && l.length > 0).length === 0 ? (
+                                <TouchableOpacity
+                                    style={styles.clearButton}
+                                    onPress={() => {
+                                        lastVerifiedLocRef.current = '';
+                                        setSno(backfillItems[0].sNo);
+                                        setAtLocation(true);
+                                    }}>
+                                    <Text style={styles.clearButtonText}>Proceed to Item</Text>
+                                </TouchableOpacity>
                             ) : (
                                 <TextInput
-                                style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1}}
+                                style={{...styles.inputField, width: 200, marginHorizontal: "auto", borderColor: "black", borderWidth: 1, height: 50}}
                                 ref={scanLocRef}
                                 onChangeText={async (newVal) => {
                                     console.log("onChangeText called - newVal:", newVal, "showKeyboard:", showKeyboard);
@@ -1195,19 +1290,20 @@ const Backfill = ({navigation}) => {
                                 value={scannedLoc}
                             />
                             )}{/* closes container/tote input ternary */}
-                            {!awaitingToteOnlyRemoval && !requireToteAfterNotHave && <TouchableOpacity onPress={() => {
+                            {!awaitingToteOnlyRemoval && !requireToteAfterNotHave && <TouchableOpacity
+                                style={{height: 50, justifyContent: 'center'}}
+                                onPress={() => {
                                 handleEditIconPress();
                             }}>
                                 <Image 
                                     style={{
                                         width: 50, 
                                         height: 50,
-                                        marginTop: 15
                                     }}
                                     source={editIcon}
                                 />
                             </TouchableOpacity>}
-                        </View>
+                        </View>{/* closes flexDirection row */}
                     </SafeAreaView>
                  }
 
