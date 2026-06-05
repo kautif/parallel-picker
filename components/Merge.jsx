@@ -399,7 +399,7 @@ const Merge = () => {
 
     useEffect(() => {
         const lock = async () => {
-            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
         };
 
         const timer = setTimeout(lock, 100);

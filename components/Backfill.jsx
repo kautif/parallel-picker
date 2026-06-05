@@ -221,7 +221,7 @@ const Backfill = ({navigation}) => {
         //         ScreenOrientation.removeOrientationChangeListener(subscription);
         //     }
         // };
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
 
         return () => {
             ScreenOrientation.unlockAsync();

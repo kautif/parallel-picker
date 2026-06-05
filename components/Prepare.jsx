@@ -251,7 +251,7 @@ async function getMergedBackfills () {
     useEffect(() => {
         getMergedBackfills();
 
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_LEFT);
+        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
 
         return () => {
             ScreenOrientation.unlockAsync();
