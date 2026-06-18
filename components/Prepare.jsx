@@ -250,10 +250,14 @@ async function getMergedBackfills () {
 
     useEffect(() => {
         getMergedBackfills();
+        const lock = async () => {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+        };
 
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+        const timer = setTimeout(lock, 100);
 
         return () => {
+            clearTimeout(timer);
             ScreenOrientation.unlockAsync();
         };
     }, []);
@@ -281,15 +285,17 @@ async function getMergedBackfills () {
     useEffect(() => {
         if (container.length >= 6 && order.length >= 6) {
 
-            dispatch(addOrder(order));
+            dispatch(addOrder(order.trim()));
             dispatch(addBackfillOrderIds({
-                orderId: order
+                orderId: order.trim()
             }));
-            dispatch(addContainer(container));
+            dispatch(addContainer(container.trim()));
             dispatch(addBackfill({
-                OrderId: order,
-                ContainerBarcode: container
+                OrderId: order.trim(),
+                ContainerBarcode: container.trim()
             }))
+            setOrder("");
+            setContainer("");
             setTimeout(() => {
                 orderRef.current?.focus();
             }, 250)
@@ -317,10 +323,6 @@ async function getMergedBackfills () {
     useEffect(() => {
         console.log("orders: ", orders);
         console.log("containers: ", containers);
-        if ((orders.length > 0 && containers.length > 0) && orders[orders.length - 1].length >= 6 && containers[containers.length - 1].length >= 6) {
-            setOrder("");
-            setContainer("");
-        }
     }, [orders, containers])
 
     return (
@@ -421,16 +423,22 @@ async function getMergedBackfills () {
                     showSoftInputOnFocus={false}
                     editable={orders.length < 4}
                     onChangeText={(newVal) => {
-                        if (orders.includes(newVal)) {
+                        const scanComplete = /[\r\n]/.test(newVal);
+                        const sanitized = newVal.replace(/[\r\n]/g, '');
+                        if (!scanComplete) {
+                            setOrder(sanitized);
+                            return;
+                        }
+                        if (orders.includes(sanitized)) {
                             setErrorMsg("Order already added");
                             playSound(buzzer);
                             setModalVisible(true);
-                        } else if (containers.includes(newVal) || newVal === container) {
+                        } else if (containers.includes(sanitized) || sanitized === container) {
                             setErrorMsg("You scanned a container");
                             playSound(buzzer);
                             setModalVisible(true);
                         } else {
-                            setOrder(newVal);
+                            setOrder(sanitized);
                         }
                 }}
                     value={order}></TextInput>
@@ -442,22 +450,23 @@ async function getMergedBackfills () {
                     showSoftInputOnFocus={false}
                     editable={containers.length < 4}
                     onChangeText={(newVal) => {
-                        if (orders.includes(newVal) || newVal === order) {
+                        const scanComplete = /[\r\n]/.test(newVal);
+                        const sanitized = newVal.replace(/[\r\n]/g, '');
+                        if (scanComplete && sanitized.length === 0) return;
+                        if (orders.includes(sanitized) || sanitized === order) {
                             setErrorMsg("You scanned an order");
                             playSound(buzzer);
                             setModalVisible(true);
-                        } else if (containers.includes(newVal)) {
+                        } else if (containers.includes(sanitized)) {
                             setErrorMsg("Container already added");
                             playSound(buzzer);
                             setModalVisible(true);
-                        } else {
-                            setContainer(newVal);
-                        }
-
-                        if (newVal.length > 1 && newVal.length < 6) {
+                        } else if (scanComplete && sanitized.length < 6) {
                             setModalVisible(true);
                             setContainer("");
                             setErrorMsg("Container must be at least 6 characters");
+                        } else {
+                            setContainer(sanitized);
                         }
                     }}
                     value={container}

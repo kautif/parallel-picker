@@ -19,9 +19,9 @@ export default function HomeScreen() {
   return (
     <NavigationIndependentTree>
       <Stack.Navigator screenOptions={{ headerShown: false}}>
-        <Stack.Screen name="Prepare" component={Prepare} options={{orientation: 'landscape_left'}}></Stack.Screen>
-        <Stack.Screen name="Backfill" component={Backfill} options={{orientation: 'landscape_left'}}></Stack.Screen>
-        <Stack.Screen name="Merge" component={Merge} options={{orientation: 'landscape_left'}}></Stack.Screen>
+        <Stack.Screen name="Prepare" component={Prepare} options={{orientation: 'landscape_right'}}></Stack.Screen>
+        <Stack.Screen name="Backfill" component={Backfill} options={{orientation: 'landscape_right'}}></Stack.Screen>
+        <Stack.Screen name="Merge" component={Merge} options={{orientation: 'landscape_right'}}></Stack.Screen>
       </Stack.Navigator>
     </NavigationIndependentTree>
   );

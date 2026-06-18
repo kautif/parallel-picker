@@ -128,7 +128,11 @@ const Backfill = ({navigation}) => {
 
     useEffect(() => {
         // playSound(nextItem);
-        console.log("rawBackfill", rawBackfillItems);
+        const lock = async () => {
+            await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
+        };
+
+        const timer = setTimeout(lock, 100);
         const setupAudio = async () => {
             try {
                 await Audio.setAudioModeAsync({
@@ -221,9 +225,8 @@ const Backfill = ({navigation}) => {
         //         ScreenOrientation.removeOrientationChangeListener(subscription);
         //     }
         // };
-        ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE_RIGHT);
-
         return () => {
+            clearTimeout(timer);
             ScreenOrientation.unlockAsync();
         };
     }, [])
