@@ -1521,6 +1521,10 @@ const Backfill = ({navigation}) => {
                     }}>
                         <TouchableOpacity 
                             style={{...styles.rectButton, backgroundColor: "rgb(0, 85, 165)", width: 75, justifyContent: 'center', verticalAlign: 'middle', alignSelf: 'flex-end', height: 62, borderColor: 'black', borderWidth: 1}}
+                            // Not focusable via hardware key/D-pad traversal — only a direct touch
+                            // should ever open this modal. Prevents the scanner's Enter keystroke
+                            // from "clicking" this button if focus ever lands here.
+                            focusable={false}
                             onPress={() => {
                                 setNotHaveVisible(true)
                         }}>
@@ -1570,9 +1574,26 @@ const Backfill = ({navigation}) => {
                                     ref={itemRef}
                                     autoFocus={true}
                                     showSoftInputOnFocus={false}
+                                    // Swallow the Enter/Return keystroke DataWedge appends after every scan so it
+                                    // can't propagate to the focus chain and "click" a nearby button (e.g. Not Have).
+                                    blurOnSubmit={false}
+                                    onSubmitEditing={() => {}}
+                                    onKeyPress={({ nativeEvent }) => {
+                                        if (nativeEvent.key === 'Enter') {
+                                            // No-op: the barcode itself already arrived via onChangeText.
+                                            // This just prevents the Enter key from bubbling further.
+                                        }
+                                    }}
                                     // editable={toteScanned && scannedQty !== orderedQty ? true : false}
-                                    onChangeText={(newVal) => {
-                                        setScannedItem(newVal);
+                                    onChangeText={(rawVal) => {
+                                        // Strip any CR/LF DataWedge may inject along with the barcode so a
+                                        // trailing Enter can't corrupt the comparison below.
+                                        const newVal = rawVal.replace(/[\r\n]/g, '');
+
+                                        // Ignore no-op fires (e.g. the stripped Enter leaving nothing new).
+                                        if (newVal.length === 0 && rawVal.length > 0) {
+                                            return;
+                                        }
 
                                         const aliasFound = backfillItems[0].upcAliasList && backfillItems[0].upcAliasList.some(obj => obj["upc"] === newVal);
                                         console.log("aliasFound: ", aliasFound);
@@ -1614,11 +1635,15 @@ const Backfill = ({navigation}) => {
 
                                        if ((newVal === backfillItems[0].itemLookupCode || aliasFound) && !newVal.includes("TA")) {
                                             setScannedQty(prevQty => Math.min(prevQty + 1, backfillItems[0].orderedQty));
+                                            // Clear synchronously instead of waiting on the scannedQty effect,
+                                            // so a fast second scan can't land on top of the old value.
+                                            setScannedItem("");
                                         } else if (backfillItems && multiplierFound) {
                                             setScannedQty(prevQty => Math.min(
                                                 prevQty + backfillItems[0].upcList[multiplierIndex].sellingUnitMultiplier,
                                                 backfillItems[0].orderedQty
                                             ));
+                                            setScannedItem("");
                                         } else {
                                             // Log the bad item scan
                                             // BadScanLogger.logBadScan({
